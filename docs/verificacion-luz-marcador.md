@@ -13,20 +13,22 @@ drawLightMarker3D(vp, e, uLightPos, W, H);
 
 `window.__lastLightPos` expone el mismo vector para pruebas automatizadas (comparado con `AUDIT.lightPosFromAzEl` leyendo los sliders).
 
+**Valores por defecto de luz:** azimut 60°, elevación 35°, **distancia 4 m**.
+
 ## Secuencia «un slider a la vez» (SwiftShader)
 
 Ejecutar: `node tools/capture-screenshots.mjs` (servidor estático en `:8765`).
 
-| Captura | Cambio | uLightPos | Marcador (pantalla) | Iluminación lateral |
-|---------|--------|-----------|---------------------|---------------------|
-| `slider-baseline-az60-el35-dist7.png` | línea base | (4.97, 3.60, 2.27) | medio-centro | más brillante a la **izquierda** |
-| `slider-only-az120.png` | solo az → 120° | (4.97, 3.60, **−3.00**) | sube y desplaza ~78 px vs anterior | gradiente pasa a **equilibrado** (luz desde otro lado) |
-| `slider-only-el70.png` | solo el → 70° | (**2.07**, 3.60, 0.60) | más arriba (~672,176) | vuelve dominancia **izquierda** (luz más cenital) |
-| `slider-only-dist4.png` | solo dist → 4 m | (2.84, 3.60, 1.04) | marcador acerca al centro 3D | escena algo más oscura (atenuación) |
-| `slider-only-color-sodio.png` | solo color sodio | **igual que línea base** | misma región que baseline (posición 3D) | tinte cálido; **sin** mover la luz |
+| Captura | Cambio | uLightPos (aprox.) | Marcador (pantalla) | Iluminación lateral |
+|---------|--------|--------------------|---------------------|---------------------|
+| `slider-baseline-az60-el35-dist4.png` | línea base | (2.84, 3.60, 1.04) | círculo amarillo 3D (no flecha de borde) | depende del azimut |
+| `slider-only-az120.png` | solo az → 120° | (4.97, 3.60, −3.00) | desplaza en pantalla | gradiente rota |
+| `slider-only-el70.png` | solo el → 70° | (2.07, 3.60, 0.60) | más alto en pantalla | luz más cenital |
+| `slider-only-dist9.png` | solo dist → 9 m | más lejos del target | marcador en el volumen del andén | atenuación más suave |
+| `slider-only-color-sodio.png` | solo color sodio | **igual que línea base** | misma posición 3D | tinte cálido |
 
 En las cinco tomas `sync uLightPos = sí` (deriva < 1e−4 entre uniforme y función de auditoría).
 
 ## Controles HUD
 
-En `index.html`: slider **Distancia (m)** (`lightDist`, 2–12). Los eventos `input` y `change` marcan `state.dirty` para redibujar en el mismo frame.
+En `index.html`: slider **Distancia (m)** (`lightDist`, 2–12, **defecto 4**). Los eventos `input` y `change` marcan `state.dirty` para redibujar en el mismo frame.

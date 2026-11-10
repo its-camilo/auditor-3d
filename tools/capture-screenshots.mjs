@@ -37,7 +37,7 @@ async function readLightSync(page) {
     const A = window.AUDIT;
     const az = Number(document.getElementById('az')?.value || 0);
     const el = Number(document.getElementById('el')?.value || 0);
-    const lightDist = Number(document.getElementById('lightDist')?.value || 7);
+    const lightDist = Number(document.getElementById('lightDist')?.value || 4);
     const expected = A.lightPosFromAzEl(az, el, lightDist, A.SCENE_TARGET);
     const uniform = window.__lastLightPos || [NaN, NaN, NaN];
     const d = Math.hypot(expected[0] - uniform[0], expected[1] - uniform[1], expected[2] - uniform[2]);
@@ -111,7 +111,7 @@ await page.goto(BASE, { waitUntil: 'networkidle' });
 
 const base = {
   view: 'sim', enDalton: false, enMyopia: false, enAstigma: false,
-  showLight: true, az: 60, el: 35, lightDist: 7, light: 'blanca'
+  showLight: true, az: 60, el: 35, lightDist: 4, light: 'blanca'
 };
 
 const shots = [
@@ -120,10 +120,10 @@ const shots = [
   { file: 'shot-astigmatism-only.png', opts: { ...base, enAstigma: true } },
   { file: 'shot-dalton-myopia.png', opts: { ...base, enDalton: true, enMyopia: true, type: 2, myopiaD: 4, order: 'optica-color' } },
   { file: 'shot-order-color-optica.png', opts: { ...base, enDalton: true, enMyopia: true, type: 2, myopiaD: 4, order: 'color-optica' } },
-  { file: 'slider-baseline-az60-el35-dist7.png', opts: { ...base }, changed: 'ninguno (línea base)', expect: 'marcador medio-derecha; sombras coherentes' },
+  { file: 'slider-baseline-az60-el35-dist4.png', opts: { ...base }, changed: 'ninguno (línea base)', expect: 'círculo amarillo 3D visible; sombras coherentes' },
   { file: 'slider-only-az120.png', opts: { ...base, az: 120 }, changed: 'solo azimut → 120°', expect: 'marcador cambia de cuadrante; lado iluminado rota' },
   { file: 'slider-only-el70.png', opts: { ...base, el: 70 }, changed: 'solo elevación → 70°', expect: 'marcador más alto en pantalla; bandas de luz más cenitales' },
-  { file: 'slider-only-dist4.png', opts: { ...base, lightDist: 4 }, changed: 'solo distancia → 4 m', expect: 'marcador más cerca del centro 3D; atenuación más fuerte' },
+  { file: 'slider-only-dist9.png', opts: { ...base, lightDist: 9 }, changed: 'solo distancia → 9 m', expect: 'marcador más lejos en el andén; atenuación más suave' },
   { file: 'slider-only-color-sodio.png', opts: { ...base, light: 'sodio' }, changed: 'solo color → sodio', expect: 'posición de marcador idéntica a línea base; tinte cálido en escena' }
 ];
 
@@ -181,7 +181,13 @@ console.log(JSON.stringify(report, null, 2));
 console.log(md);
 if (logs.length) console.error('console errors:', logs.join('\n'));
 const sliderRows = report.filter((r) => r.file.startsWith('slider-'));
-const fail = sliderRows.some((r) => !r.syncOk || r.yellowPx < 60);
+const baselineRow = sliderRows.find((r) => r.file.includes('baseline'));
+const defaultRow = report.find((r) => r.file === 'shot-default-light-marker.png');
+const marker3dOk = (r) => r && r.yellowPx >= 400 && r.marker && !r.marker.includes('no detectado');
+const fail = sliderRows.some((r) => !r.syncOk || r.yellowPx < 60)
+  || !marker3dOk(baselineRow) || !marker3dOk(defaultRow);
+if (!marker3dOk(baselineRow)) console.error('FAIL: baseline sin círculo amarillo 3D visible (¿flecha de borde?)');
+if (!marker3dOk(defaultRow)) console.error('FAIL: default sin círculo amarillo 3D visible');
 const baseline = sliderRows.find((r) => r.file.includes('baseline'));
 const azOnly = sliderRows.find((r) => r.file.includes('only-az'));
 const colorOnly = sliderRows.find((r) => r.file.includes('color-sodio'));

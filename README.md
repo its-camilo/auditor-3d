@@ -4,7 +4,9 @@ Escena 3D de un andén de TransMilenio que audita, **objeto por objeto**, qué s
 
 **Demo:** https://auditor-3d.vercel.app/
 
-**Relación con el Proyecto 1 ([daltonizador-web](https://github.com/its-camilo/daltonizador-web)):** el P1 filtra una imagen plana: el color (y el contraste WCAG) cambia con la simulación, pero la escena es fija. Aquí la **luz es una variable** y además se pueden encadenar **afectaciones ópticas** (miopía, astigmatismo) antes del daltonismo. La simulación Machado/Brettel vive en `shaders/daltonismo.frag` (`uInputLinear = 1` sobre RGB lineal del FBO).
+**Relación con el Proyecto 1 ([daltonizador-web](https://github.com/its-camilo/daltonizador-web)):** el P1 filtra una imagen plana: el color (y el contraste WCAG) cambia con la simulación, pero la escena es fija. Aquí la **luz es una variable** (puntual, az/el/**distancia**) y además se pueden encadenar **afectaciones ópticas** (miopía, astigmatismo) antes del daltonismo. La simulación Machado/Brettel vive en `shaders/daltonismo.frag` (`uInputLinear = 1` sobre RGB lineal del FBO).
+
+**Esta versión incluye:** escena Blinn–Phong con **luz puntual** y **marcador 3D** sincronizado (`uLightPos` único por frame); panel **Condiciones** (daltonismo, miopía, astigmatismo, orden óptica↔color); auditoría con etiqueta `conditionLabel()` según condiciones activas (sin forzar «deutan» si el daltonismo está apagado); verificación automatizada en `tools/capture-screenshots.mjs` y `docs/verificacion-luz-marcador.md`.
 
 ## Uso local
 
@@ -19,6 +21,7 @@ Verificación numérica de la teoría (mismo núcleo que el HUD):
 
 ```bash
 node tools/teoria-conmutacion.js 1.0
+node tools/capture-screenshots.mjs   # requiere servidor en :8765 y Playwright (SwiftShader)
 ```
 
 Requisitos: navegador con **WebGL2** (Chrome, Brave, Firefox, Safari recientes). `EXT_color_buffer_float` mejora el buffer de color (RGBA16F); sin la extensión se usa RGBA8.
@@ -32,9 +35,10 @@ Requisitos: navegador con **WebGL2** (Chrome, Brave, Firefox, Safari recientes).
 | Seleccionar objeto para auditar | Clic en la escena |
 | Deseleccionar | Segundo clic en el mismo objeto (escena o lista) |
 | Vista original / simulada | Tecla **F** o selector «Vista» (apaga o enciende toda la cadena) |
-| Condiciones | Casillas: daltonismo, miopía (\|D\|, pupila), astigmatismo (cilindro, eje); orden óptica→color o color→óptica |
-| Tipo y severidad | Selectores «Tipo» y «Severidad» (daltonismo) |
-| Luz | Azimut, elevación, preset; casilla **marca del origen** (disco amarillo billboard) |
+| Condiciones | Panel **Condiciones:** casillas daltonismo, miopía (\|D\|, pupila), astigmatismo (cilindro, eje); select **Orden** (óptica→color / color→óptica). Cada etapa activa usa su shader (`miopia.frag`, `astigmatismo.frag`, `daltonismo.frag`) en ping-pong. |
+| Tipo y severidad | Selectores «Tipo» y «Severidad» (solo si daltonismo está activo) |
+| Luz | Azimut, elevación, **distancia (2–12 m, defecto 4 m)**, presets de color; casilla **marca del origen** — círculo amarillo 3D (`marcaluz`) o flecha 2D en el borde si la luz queda fuera del frustum |
+| Resumen auditoría | Línea superior del HUD: prefijo según condiciones (`sin condiciones`, `deutan + miopía 4 D`, etc.) + conteos de fallas y confusiones |
 | Marcas de accesibilidad | Tecla **H** o selector «Marcas»: contorno (defecto), patrón de relleno, apagadas |
 
 Leyenda de marcas (no dependen solo del color, SC 1.4.1): rayas = no se distingue del fondo; doble línea = se confunde con otro objeto; punteado = WCAG < 3:1.

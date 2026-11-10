@@ -8,7 +8,7 @@ const M = require('../js/machado.js');
 const { OBJECTS, LIGHTS, byId } = require('../js/scene.js');
 
 const SEV = Number(process.argv[2] || 1.0);
-const LIGHT_DIST = 7;
+const LIGHT_DIST = 4;
 const TARGET = A.SCENE_TARGET;
 // Ojo aproximado con la camara por defecto (main.js): radio 9.5, pitch 0.18, yaw 0.
 const EYE = [

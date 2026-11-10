@@ -26,7 +26,7 @@
     enDalton: true, enMyopia: false, enAstigma: false, order: 'optica-color',
     myopiaD: 3, pupilMm: 4, cylinderD: 1.5, axisDeg: 90,
     showLight: true,
-    az: 60, el: 35, lightDist: 7, light: 'blanca', ambient: 0.2, intensity: 0.8,
+    az: 60, el: 35, lightDist: 4, light: 'blanca', ambient: 0.2, intensity: 0.8,
     heat: 1, selected: 0,
     yaw: 0.0, pitch: 0.18, radius: 9.5, target: [0, 1.4, -0.6],
     dirty: true, lastAudit: 0
