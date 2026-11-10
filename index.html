@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Auditor 3D de accesibilidad cromática · v0</title>
+<title>Auditor 3D de accesibilidad cromática · v1</title>
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -11,11 +11,11 @@
   <section class="stage">
     <canvas id="gl" aria-label="Escena 3D: andén de TransMilenio"></canvas>
     <p id="error" role="alert"></p>
-    <p class="hint">Arrastra para orbitar · rueda para acercar · clic para auditar un objeto · F original/simulada · H mapa de calor</p>
+    <p class="hint">Arrastra para orbitar · rueda para acercar · clic para auditar un objeto · F original/simulada · H marcas</p>
     <p id="fps" class="fps"></p>
   </section>
   <aside class="hud">
-    <h1>Auditor 3D <small>v0</small></h1>
+    <h1>Auditor 3D <small>v1</small></h1>
     <fieldset>
       <legend>Visión</legend>
       <label>Vista <select id="view"><option value="sim">Simulada</option><option value="orig">Original</option></select></label>
@@ -28,7 +28,8 @@
       <label>Elevación <input id="el" type="range" min="5" max="85" step="5" value="35"> <output id="elV">35</output>°</label>
       <label>Color <select id="light"><option value="blanca">Blanca D65</option><option value="sodio">Sodio (noche)</option><option value="ledFria">LED fría</option></select></label>
     </fieldset>
-    <label class="row"><input id="heat" type="checkbox" checked> Mapa de calor (rayas = falla, puntos = WCAG &lt; 3:1)</label>
+    <label>Marcas <select id="heat"><option value="1" selected>Contorno</option><option value="2">Patrón</option><option value="0">Apagadas</option></select></label>
+    <p class="muted">Rayas = no se distingue del fondo · doble línea = se confunde con otro objeto · puntos = WCAG &lt; 3:1</p>
     <p id="summary" class="summary"></p>
     <ul id="list" class="list"></ul>
     <div id="detail" class="detail"><p>Haz clic en un objeto de la escena.</p></div>
@@ -38,6 +39,7 @@
 <script src="machado.js"></script>
 <script src="audit-core.js"></script>
 <script src="scene.js"></script>
+<script src="obj.js"></script>
 <script src="main.js"></script>
 </body>
 </html>

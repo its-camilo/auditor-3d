@@ -33,3 +33,7 @@ tr.cur td { background: #2a2a35; font-weight: 700; }
 .muted { color: #bbb; font-size: 13px; }
 code { font-size: 15px; }
 @media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; } }
+
+.conf { background: #1d1d26; padding: 8px; border: 1px dashed #aaa; }
+button.link { background: none; border: none; color: #fff; text-decoration: underline; padding: 0; cursor: pointer; }
+.list button.st3 { border-left: 6px double #fff; }

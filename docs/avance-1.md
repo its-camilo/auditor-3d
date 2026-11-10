@@ -58,3 +58,14 @@ python3 -m http.server 8000      # dentro de la carpeta del prototipo
 # abrir http://localhost:8000
 node tools/teoria-conmutacion.js 1.0   # verificación numérica de la teoría
 ```
+
+## 8. Actualización v1 (3 de noviembre de 2026, noche)
+
+Cambios pedidos tras la primera prueba en GPU (la v0 corrió a 61 fps en 1736×1378):
+
+1. **Modelos 3D propios.** Las cajas se reemplazaron por modelos OBJ: andén con borde y columnas, techo, franja podotáctil con 732 domos, bus con carrocería redondeada, ventanas, puerta y ruedas, señales con letras H y B en relieve, mapa de troncales con 6 rutas, panel de ayuda con botón cilíndrico y banca con respaldo y patas (unos 24 000 triángulos en total). Los genera `tools/generar-modelos.py`. La app los lee con un lector OBJ propio (`obj.js`), sin librerías ni CDN, para cumplir los requisitos del curso (WebGL2 sin frameworks, sin Three.js, todo local). Un modelo exportado de Blender entra por el mismo camino si el nombre del objeto coincide con el campo `part` de `scene.js`.
+2. **Confusión entre objetos.** Además de "objeto contra fondo", el auditor detecta pares de figuras que en visión normal se separan (ΔE_OK ≥ 0.10) pero en el tipo simulado no (ΔE_OK < 0.08). Es el caso del mapa de rutas.
+3. **Selección.** Un segundo clic sobre el objeto seleccionado (en la lista o en la escena) lo deselecciona.
+4. **Marcas más limpias.** El patrón de la v0 cubría también el piso y la pared. Ahora solo se marcan las figuras y el modo por defecto es un contorno: rayas negras y blancas = no se distingue del fondo, doble línea = se confunde con otro objeto, punteado = WCAG < 3:1. El relleno con patrón sigue disponible (tecla H). Las marcas no dependen solo del color, por WCAG 1.4.1.
+
+Valores verificados en CPU para los pares del mapa (luz blanca frontal, severidad 1.0): ruta roja/verde ΔE_OK 0.274 normal y 0.024 deutan; naranja/oliva 0.215 normal y 0.018 protan; mostaza/violeta 0.234 normal y 0.019 tritan.

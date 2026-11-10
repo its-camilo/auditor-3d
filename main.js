@@ -1,4 +1,5 @@
-/* main.js — host WebGL2 del Auditor 3D (v0). JavaScript puro, sin frameworks.
+/* main.js — host WebGL2 del Auditor 3D (v1). JavaScript puro, sin frameworks.
+ * Modelos: OBJ locales (models/) leídos con obj.js (sin librerías ni CDN).
  *
  * Pasadas por frame:
  *   1. Escena -> FBO con MRT: color lineal (RGBA16F) + ID (RGBA8). Blinn-Phong.
@@ -10,7 +11,7 @@
  */
 (function () {
   'use strict';
-  const A = window.AUDIT, M = window.DALTON_MACHADO, S = window.SCENE;
+  const A = window.AUDIT, M = window.DALTON_MACHADO, S = window.SCENE, OBJ = window.OBJ;
   const $ = (id) => document.getElementById(id);
   const canvas = $('gl');
   const gl = canvas.getContext('webgl2', { antialias: false, preserveDrawingBuffer: false });
@@ -21,13 +22,15 @@
   const state = {
     view: 'sim', type: 2, sev: 1.0,
     az: 60, el: 35, light: 'blanca', ambient: 0.2, intensity: 0.8,
-    heat: true, selected: 0,
+    heat: 1, selected: 0, // heat: 0 apagado, 1 contorno, 2 patrón
     yaw: 0.0, pitch: 0.18, radius: 9.5, target: [0, 1.4, -0.6],
     dirty: true, lastAudit: 0
   };
   const albedo = {}; // id -> albedo lineal actual (puede cambiar con "Aplicar sugerencia")
   S.OBJECTS.forEach((o) => { albedo[o.id] = A.hexToLin(o.hex); });
   let audit = {}; // id -> resultados
+  let confusions = {}; // id -> [{ other, dE, dEn }] para el tipo actual
+  const isFig = (id) => { const o = S.byId(Number(id)); return o && o.role === 'figura'; };
 
   // ---------------- mat4 (column-major) ----------------
   const m4 = {
@@ -57,26 +60,15 @@
   }
 
   // ---------------- geometria ----------------
-  function cubeVAO() {
-    const F = [ // normal, u, v (ejes de la cara)
-      [[1, 0, 0], [0, 0, -1], [0, 1, 0]], [[-1, 0, 0], [0, 0, 1], [0, 1, 0]],
-      [[0, 1, 0], [1, 0, 0], [0, 0, -1]], [[0, -1, 0], [1, 0, 0], [0, 0, 1]],
-      [[0, 0, 1], [1, 0, 0], [0, 1, 0]], [[0, 0, -1], [-1, 0, 0], [0, 1, 0]]
-    ];
-    const v = [], idx = [];
-    F.forEach(([n, u, w], f) => {
-      [[-1, -1], [1, -1], [1, 1], [-1, 1]].forEach(([a, b]) => {
-        v.push(0.5 * (n[0] + a * u[0] + b * w[0]), 0.5 * (n[1] + a * u[1] + b * w[1]), 0.5 * (n[2] + a * u[2] + b * w[2]), n[0], n[1], n[2]);
-      });
-      const k = f * 4; idx.push(k, k + 1, k + 2, k, k + 2, k + 3);
-    });
+  // VAO no indexado a partir de las posiciones y normales del OBJ.
+  function meshVAO(mesh) {
     const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
-    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(v), gl.STATIC_DRAW);
-    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 24, 0);
-    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 24, 12);
-    const ib = gl.createBuffer(); gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, ib); gl.bufferData(gl.ELEMENT_ARRAY_BUFFER, new Uint16Array(idx), gl.STATIC_DRAW);
+    const vb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, vb); gl.bufferData(gl.ARRAY_BUFFER, mesh.pos, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 3, gl.FLOAT, false, 0, 0);
+    const nb = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, nb); gl.bufferData(gl.ARRAY_BUFFER, mesh.nor, gl.STATIC_DRAW);
+    gl.enableVertexAttribArray(1); gl.vertexAttribPointer(1, 3, gl.FLOAT, false, 0, 0);
     gl.bindVertexArray(null);
-    return { vao, count: idx.length };
+    return { vao, count: mesh.count };
   }
   function quadVAO() {
     const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
@@ -124,9 +116,16 @@
   // Textura 256x1 con el estado de cada objeto para el mapa de calor.
   let texStatus = null;
   const statusData = new Uint8Array(256 * 4);
+  // 0 bien, 1 aviso WCAG, 2 falla contra el fondo, 3 se confunde con otro objeto.
   function uploadStatus() {
     statusData.fill(0);
-    Object.keys(audit).forEach((id) => { statusData[id * 4] = audit[id].status[state.type]; });
+    computeConfusions();
+    Object.keys(audit).forEach((id) => {
+      if (!isFig(id)) return;
+      let st = audit[id].status[state.type];
+      if (st < 2 && confusions[id] && confusions[id].length) st = 3;
+      statusData[id * 4] = st;
+    });
     if (!texStatus) texStatus = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, 256, 1);
     gl.bindTexture(gl.TEXTURE_2D, texStatus);
     gl.texSubImage2D(gl.TEXTURE_2D, 0, 0, 0, 256, 1, gl.RGBA, gl.UNSIGNED_BYTE, statusData);
@@ -142,7 +141,8 @@
   }
 
   // ---------------- render ----------------
-  let P = {}, cube, quad;
+  let P = {}, meshes = {}, quad;
+  const IDENTITY4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   function render() {
     resize();
     const e = eye(), light = lightNow();
@@ -162,14 +162,15 @@
     gl.uniform1f(ps.loc.uAmbient, light.ambient);
     gl.uniform1f(ps.loc.uIntensity, light.intensity);
     gl.uniform3fv(ps.loc.uEye, e);
-    gl.bindVertexArray(cube.vao);
+    gl.uniformMatrix4fv(ps.loc.uModel, false, IDENTITY4); // los OBJ vienen en coordenadas de mundo
     S.OBJECTS.forEach((o) => {
-      gl.uniformMatrix4fv(ps.loc.uModel, false, m4.ts(o.c, o.s));
+      const mesh = meshes[o.id]; if (!mesh) return;
+      gl.bindVertexArray(mesh.vao);
       gl.uniform3fv(ps.loc.uKd, albedo[o.id]);
       gl.uniform1f(ps.loc.uKs, o.ks);
       gl.uniform1f(ps.loc.uShininess, o.sh);
       gl.uniform1f(ps.loc.uId, o.id);
-      gl.drawElements(gl.TRIANGLES, cube.count, gl.UNSIGNED_SHORT, 0);
+      gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
     });
 
     // Auditoria con los buffers recien dibujados (si algo cambio).
@@ -198,7 +199,7 @@
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texId); gl.uniform1i(ph.loc.uIds, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texStatus); gl.uniform1i(ph.loc.uStatus, 1);
     gl.uniform1f(ph.loc.uSelected, state.selected);
-    gl.uniform1f(ph.loc.uShowHeat, state.heat ? 1 : 0);
+    gl.uniform1f(ph.loc.uMode, state.heat);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.BLEND);
     gl.bindVertexArray(null);
@@ -256,6 +257,28 @@
     updateHUD();
   }
 
+  // ---------------- confusión entre objetos ----------------
+  // Dos figuras se confunden si en visión normal se separan (ΔE ≥ 0.10) y en el
+  // tipo simulado no (ΔE < τ). Es la confusión de un mapa de rutas: el problema
+  // no es contra el fondo sino entre objetos que deben distinguirse entre sí.
+  const TAU_PAIR_NORMAL = 0.10;
+  function computeConfusions() {
+    confusions = {};
+    const ids = Object.keys(audit).filter(isFig);
+    const t = state.type;
+    for (let i = 0; i < ids.length; i++) {
+      for (let j = i + 1; j < ids.length; j++) {
+        const a = A.clamp01(audit[ids[i]].obj), b = A.clamp01(audit[ids[j]].obj);
+        const dEn = A.dEok(a, b);
+        if (dEn < TAU_PAIR_NORMAL || t === 0) continue;
+        const dE = A.dEok(A.simulate(t, state.sev, a), A.simulate(t, state.sev, b));
+        if (dE >= A.TH.TAU_DE) continue;
+        (confusions[ids[i]] = confusions[ids[i]] || []).push({ other: Number(ids[j]), dE, dEn });
+        (confusions[ids[j]] = confusions[ids[j]] || []).push({ other: Number(ids[i]), dE, dEn });
+      }
+    }
+  }
+
   // ---------------- picking ----------------
   function pick(clientX, clientY) {
     const r = canvas.getBoundingClientRect();
@@ -265,26 +288,30 @@
     const px = new Uint8Array(4);
     gl.readPixels(x, y, 1, 1, gl.RGBA, gl.UNSIGNED_BYTE, px);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
-    state.selected = px[0];
+    state.selected = px[0] === state.selected ? 0 : px[0]; // clic sobre el mismo objeto = deseleccionar
     updateHUD();
   }
 
   // ---------------- HUD ----------------
-  const LABEL = ['Bien', 'Aviso: WCAG < 3:1', 'Falla: no distinguible'];
-  const ICON = ['✔', '⚠', '✖'];
+  const LABEL = ['Bien', 'Aviso: WCAG < 3:1', 'Falla: no distinguible', 'Se confunde con otro objeto'];
+  const ICON = ['✔', '⚠', '✖', '≈'];
+  const stOf = (id) => statusData[id * 4];
   function updateHUD() {
     // Lista de objetos ordenada por gravedad para el tipo actual.
-    const rows = Object.keys(audit).map((id) => ({ id: Number(id), a: audit[id] }))
-      .sort((p, q) => q.a.status[state.type] - p.a.status[state.type] || p.a.metrics[state.type].dE - q.a.metrics[state.type].dE);
+    const rank = [0, 1, 3, 2]; // falla > confusión > aviso > bien
+    const rows = Object.keys(audit).filter(isFig).map((id) => ({ id: Number(id), a: audit[id] }))
+      .sort((p, q) => rank[stOf(q.id)] - rank[stOf(p.id)] || p.a.metrics[state.type].dE - q.a.metrics[state.type].dE);
     $('list').innerHTML = rows.map(({ id, a }) => {
-      const m = a.metrics[state.type], st = a.status[state.type];
+      const m = a.metrics[state.type], st = stOf(id);
       return `<li><button data-id="${id}" class="st${st}${id === state.selected ? ' sel' : ''}">${ICON[st]} ${S.byId(id).name}<span>ΔE ${m.dE.toFixed(3)} · ${m.wcag.toFixed(2)}:1</span></button></li>`;
     }).join('');
-    const nFail = rows.filter((r) => r.a.status[state.type] === 2).length;
-    $('summary').textContent = `${A.TYPES[state.type]}: ${nFail} de ${rows.length} objetos no distinguibles de su fondo`;
+    const nFail = rows.filter((r) => stOf(r.id) === 2).length;
+    const nPairs = Object.values(confusions).reduce((n, l) => n + l.length, 0) / 2;
+    $('summary').textContent = `${A.TYPES[state.type]}: ${nFail} de ${rows.length} objetos no se distinguen de su fondo · ${nPairs} pares se confunden entre sí`;
 
     const box = $('detail');
     const a = audit[state.selected], o = S.byId(state.selected);
+    if (o && o.role !== 'figura') { box.innerHTML = `<h3>${o.name}</h3><p>Superficie de fondo: no se audita como figura, pero sirve de fondo a las demás.</p>`; return; }
     if (!o) { box.innerHTML = '<p>Haz clic en un objeto de la escena.</p>'; return; }
     if (!a) { box.innerHTML = `<h3>${o.name}</h3><p>Sin fondo visible desde esta camara.</p>`; return; }
     const bgName = S.byId(a.mainBg) ? S.byId(a.mainBg).name : '—';
@@ -293,6 +320,10 @@
     html += '<table><tr><th>Visión</th><th>ΔE OKLab</th><th>WCAG</th><th>Estado</th></tr>';
     a.metrics.forEach((m, t) => { html += `<tr${t === state.type ? ' class="cur"' : ''}><td>${m.type}</td><td>${m.dE.toFixed(3)}</td><td>${m.wcag.toFixed(2)}:1</td><td>${ICON[a.status[t]]} ${LABEL[a.status[t]]}</td></tr>`; });
     html += '</table>';
+    const conf = confusions[o.id] || [];
+    if (conf.length) {
+      html += `<p class="conf">≈ En ${A.TYPES[state.type]} se confunde con: ` + conf.map((c) => `<button class="link" data-id="${c.other}">${S.byId(c.other).name}</button> (ΔE ${c.dE.toFixed(3)}; normal ${c.dEn.toFixed(3)})`).join(', ') + '. Si la forma es distinta, la forma los separa.</p>';
+    }
     const worst = Math.max(a.status[1], a.status[2], a.status[3]);
     if (worst > 0) {
       const sug = A.suggest(albedo[o.id], A.clamp01(a.obj), A.clamp01(a.bg), state.sev);
@@ -304,6 +335,7 @@
     box.innerHTML = html;
     const ap = $('apply'); if (ap) ap.onclick = () => { albedo[o.id] = A.hexToLin(ap.dataset.hex); state.dirty = true; };
     $('reset').onclick = () => { albedo[o.id] = A.hexToLin(o.hex); state.dirty = true; };
+    box.querySelectorAll('button.link').forEach((b) => { b.onclick = () => { state.selected = Number(b.dataset.id); updateHUD(); }; });
   }
 
   // ---------------- controles ----------------
@@ -316,12 +348,18 @@
     set('type', 'type', Number); set('sev', 'sev', Number, 'sevV');
     set('az', 'az', Number, 'azV'); set('el', 'el', Number, 'elV');
     set('light', 'light', String); set('view', 'view', String);
-    $('heat').addEventListener('change', (e) => { state.heat = e.target.checked; });
-    $('list').addEventListener('click', (e) => { const b = e.target.closest('button'); if (b) { state.selected = Number(b.dataset.id); updateHUD(); } });
+    $('heat').addEventListener('input', (e) => { state.heat = Number(e.target.value); });
+    // Clic en el recuadro del objeto ya seleccionado = deseleccionar.
+    $('list').addEventListener('click', (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      const id = Number(b.dataset.id);
+      state.selected = state.selected === id ? 0 : id;
+      updateHUD();
+    });
     window.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
       if (e.key === 'f' || e.key === 'F') { $('view').value = state.view === 'sim' ? 'orig' : 'sim'; $('view').dispatchEvent(new Event('input')); }
-      if (e.key === 'h' || e.key === 'H') { $('heat').checked = !$('heat').checked; state.heat = $('heat').checked; }
+      if (e.key === 'h' || e.key === 'H') { $('heat').value = String((state.heat + 1) % 3); state.heat = Number($('heat').value); }
     });
     // Orbita: arrastrar. Clic sin arrastre: picking.
     let drag = null;
@@ -353,7 +391,15 @@
     try {
       const [sv, sf, dv, df, hf] = await Promise.all(['shaders/escena.vert', 'shaders/escena.frag', 'shaders/daltonizador.vert', 'shaders/daltonizador.frag', 'shaders/heatmap.frag'].map(src));
       P.scene = program(sv, sf); P.dalton = program(dv, df); P.heat = program(dv, hf);
-      cube = cubeVAO(); quad = quadVAO();
+      // Modelos OBJ locales: un VAO por objeto auditable (nombre "o" = campo part).
+      const files = [...new Set(S.OBJECTS.map((o) => o.model))];
+      const parsed = {};
+      await Promise.all(files.map(async (f) => { parsed[f] = OBJ.parseOBJ(await src('models/' + f + '.obj')); }));
+      S.OBJECTS.forEach((o) => {
+        const part = parsed[o.model][o.part];
+        if (part) meshes[o.id] = meshVAO(part); else console.warn('Falta la parte', o.part, 'en', o.model);
+      });
+      quad = quadVAO();
       resize(); uploadStatus(); bind();
       requestAnimationFrame(loop);
     } catch (err) {
