@@ -27,7 +27,7 @@ Se siguió el mismo camino del Proyecto 1: primero la teoría (documento "Revisi
 
 1.  **Pasada 1 (Local Lighting + RTT + MRT).** Escena de cajas → FBO con dos salidas: color lineal RGBA16F e ID RGBA8.
 
-2.  **Pasada 2 (Color).** Quad NDC con el daltonizador.frag del Proyecto 1 → pantalla. Vista original o simulada (tecla F).
+2.  **Pasada 2 (Color).** Cadena ping-pong (óptica y/o daltonismo) o `mostrar.frag` si no hay etapas activas.
 
 3.  **Pasada 3 (HUD/Visualization).** Quad NDC con heatmap.frag y mezcla alfa: patrón por estado y contorno del objeto seleccionado (tecla H).
 

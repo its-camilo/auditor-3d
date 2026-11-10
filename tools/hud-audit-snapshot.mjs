@@ -30,12 +30,12 @@ async function setCond(page, opts) {
 }
 
 const scenarios = [
-  { key: 'default', label: 'Default (deutan, D65)', opts: { view: 'sim', enDalton: true, type: 2, enMyopia: false, enAstigma: false, light: 'blanca' } },
-  { key: 'dalton-off-d65', label: 'Daltonismo apagado, D65', opts: { view: 'sim', enDalton: false, enMyopia: false, enAstigma: false, light: 'blanca' } },
-  { key: 'dalton-off-sodio', label: 'Daltonismo apagado, sodio', opts: { view: 'sim', enDalton: false, enMyopia: false, enAstigma: false, light: 'sodio' } },
-  { key: 'deutan', label: 'Deutan', opts: { view: 'sim', enDalton: true, type: 2, enMyopia: false, enAstigma: false, light: 'blanca' } },
-  { key: 'deutan-myopia-optica-color', label: 'Deutan + miopía 4D, óptica→color', opts: { view: 'sim', enDalton: true, type: 2, enMyopia: true, myopiaD: 4, enAstigma: false, order: 'optica-color', light: 'blanca' } },
-  { key: 'deutan-myopia-color-optica', label: 'Deutan + miopía 4D, color→óptica', opts: { view: 'sim', enDalton: true, type: 2, enMyopia: true, myopiaD: 4, enAstigma: false, order: 'color-optica', light: 'blanca' } }
+  { key: 'default', label: 'Default (deutan, D65)', opts: { enDalton: true, type: 2, enMyopia: false, enAstigma: false, light: 'blanca' } },
+  { key: 'dalton-off-d65', label: 'Daltonismo apagado, D65', opts: { enDalton: false, enMyopia: false, enAstigma: false, light: 'blanca' } },
+  { key: 'dalton-off-sodio', label: 'Daltonismo apagado, sodio', opts: { enDalton: false, enMyopia: false, enAstigma: false, light: 'sodio' } },
+  { key: 'deutan', label: 'Deutan', opts: { enDalton: true, type: 2, enMyopia: false, enAstigma: false, light: 'blanca' } },
+  { key: 'deutan-myopia-optica-color', label: 'Deutan + miopía 4D, óptica→color', opts: { enDalton: true, type: 2, enMyopia: true, myopiaD: 4, enAstigma: false, order: 'optica-color', light: 'blanca' } },
+  { key: 'deutan-myopia-color-optica', label: 'Deutan + miopía 4D, color→óptica', opts: { enDalton: true, type: 2, enMyopia: true, myopiaD: 4, enAstigma: false, order: 'color-optica', light: 'blanca' } }
 ];
 
 const browser = await chromium.launch({
