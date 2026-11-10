@@ -110,9 +110,10 @@
 
   // ---------- metricas de un par objeto/fondo ----------
   const TYPES = ['normal', 'protan', 'deutan', 'tritan'];
-  function pairMetrics(obj, bg, sev) {
+  function pairMetrics(obj, bg, sev, skipSimulateType) {
     return TYPES.map((name, t) => {
-      const a = simulate(t, sev, obj), b = simulate(t, sev, bg);
+      const color = (c) => (skipSimulateType === t ? clamp01(c) : simulate(t, sev, c));
+      const a = color(obj), b = color(bg);
       return { type: name, wcag: wcag(a, b), dE: dEok(a, b) };
     });
   }

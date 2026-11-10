@@ -52,7 +52,7 @@ Leyenda de marcas (no dependen solo del color, SC 1.4.1): rayas = no se distingu
 
 **Picking:** IDs de la pasada de escena, sin desenfoque.
 
-**Auditoría (CPU):** promedios de color desde el buffer **tras óptica** (si está activa) y **antes** del daltonismo; IDs desde la escena; métricas ΔE/WCAG con `js/audit-core.js`. Ver nota en el HUD si hay miopía o astigmatismo.
+**Auditoría (CPU):** promedios desde `texAuditSrc` según el orden del pipe — **óptica→color:** tras óptica y **antes** de daltonismo (Machado una vez en CPU); **color→óptica** con ambas etapas: tras la cadena completa (daltonismo ya en buffer, sin segunda pasada CPU). Confusiones entre objetos solo si daltonismo está activo. IDs desde la escena; ver nota en el HUD si hay óptica.
 
 ```
 [ Escena + Blinn-Phong ] ──► color + ID + depth
