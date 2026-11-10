@@ -117,27 +117,37 @@
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texColor, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, texId, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texDepth, 0);
+    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) $('error').textContent = 'FBO escena incompleto.';
     const fmt = floatOK ? [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT] : [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE];
     for (let i = 0; i < 2; i++) {
       pipeTex[i] = tex(fmt[0], fmt[1], fmt[2], W, H);
       pipeFbo[i] = gl.createFramebuffer();
       gl.bindFramebuffer(gl.FRAMEBUFFER, pipeFbo[i]);
       gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pipeTex[i], 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) $('error').textContent = 'FBO pipe incompleto.';
     }
-    gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) $('error').textContent = 'FBO incompleto.';
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     texAuditSrc = texColor;
     state.dirty = true;
   }
 
+  // uLightDir apunta hacia la fuente (misma convencion que escena.frag, N·L > 0 iluminado).
   function lightMarkerPos(light) {
-    const r = state.radius * 1.05;
+    const d = state.radius * 1.25;
     return [
-      state.target[0] - light.dir[0] * r,
-      state.target[1] - light.dir[1] * r + 0.25,
-      state.target[2] - light.dir[2] * r
+      state.target[0] + light.dir[0] * d,
+      state.target[1] + light.dir[1] * d,
+      state.target[2] + light.dir[2] * d
     ];
+  }
+
+  function markerBehindCamera(eye, light) {
+    const vx = state.target[0] - eye[0], vy = state.target[1] - eye[1], vz = state.target[2] - eye[2];
+    const vl = Math.hypot(vx, vy, vz) || 1;
+    const dot = (vx * light.dir[0] + vy * light.dir[1] + vz * light.dir[2]) / vl;
+    return dot < 0.05;
   }
 
   function buildStages() {
@@ -299,13 +309,15 @@
     gl.disable(gl.BLEND);
 
     if (state.showLight) {
+      const behind = markerBehindCamera(e, light);
       const lm = lightMarkerPos(light);
       const ml = P.marcaluz;
       gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
       gl.useProgram(ml.p);
       gl.uniform3fv(ml.loc.uCenter, lm);
       gl.uniform3fv(ml.loc.uEye, e);
-      gl.uniform1f(ml.loc.uRadius, 0.22);
+      gl.uniform1f(ml.loc.uRadius, behind ? 0.16 : 0.22);
+      gl.uniform1f(ml.loc.uBehind, behind ? 1.0 : 0.0);
       gl.uniformMatrix4fv(ml.loc.uViewProj, false, vp);
       gl.bindVertexArray(markerVao);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
