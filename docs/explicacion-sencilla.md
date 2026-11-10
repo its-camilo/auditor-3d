@@ -124,7 +124,7 @@ Controles de la luz en el panel:
 
 ## 8. Qué ves en el panel
 
-- **Vista**: original o simulada. La tecla F cambia entre las dos.
+- La cadena de condiciones (óptica y daltonismo) siempre está disponible desde el panel **Condiciones**; no hay modo «original» aparte.
 
 - **Tipo y severidad** del daltonismo.
 

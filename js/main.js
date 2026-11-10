@@ -3,7 +3,7 @@
  *
  * Pasadas por frame:
  *   1. Escena -> FBO con MRT: color lineal + ID + profundidad.
- *   2. Pipe ping-pong (miopía, astigmatismo, daltonismo) si Vista = simulada.
+ *   2. Pipe ping-pong (miopía, astigmatismo, daltonismo) según condiciones activas.
  *   3. Quad NDC con heatmap.frag (IDs sin desenfoque).
  *   4. Marcador de origen de luz (billboard, sin IDs ni auditoría).
  * Auditoria (CPU, cuando algo cambia): readPixels de color e ID, promedio por
@@ -22,7 +22,7 @@
   // ---------------- estado ----------------
   const NEAR = 0.1, FAR = 100, FOVY = 50 * Math.PI / 180;
   const state = {
-    view: 'sim', type: 2, sev: 1.0,
+    type: 2, sev: 1.0,
     enDalton: true, enMyopia: false, enAstigma: false, order: 'optica-color',
     myopiaD: 3, pupilMm: 4, cylinderD: 1.5, axisDeg: 90,
     showLight: true,
@@ -211,7 +211,6 @@
   }
 
   function buildStages() {
-    if (state.view !== 'sim') return [];
     const opt = [];
     if (state.enMyopia && state.myopiaD > 0.05) opt.push('myopia');
     if (state.enAstigma && state.cylinderD > 0.05) opt.push('astigma');
@@ -324,7 +323,7 @@
     if (!audit[id]) return 0;
     const mi = metricsIndex();
     let st = audit[id].status[mi];
-    if (state.view === 'sim' && state.enDalton && state.type !== 0 && st < 2 && confusions[id] && confusions[id].length) st = 3;
+    if (state.enDalton && state.type !== 0 && st < 2 && confusions[id] && confusions[id].length) st = 3;
     return st;
   }
 
@@ -355,7 +354,6 @@
   }
 
   function conditionLabel() {
-    if (state.view === 'orig') return 'original';
     const parts = [];
     if (state.enDalton && state.type !== 0) parts.push(A.TYPES[state.type]);
     else if (state.enDalton) parts.push('daltonismo neutro');
@@ -365,12 +363,12 @@
   }
 
   function metricsIndex() {
-    return (state.view === 'sim' && state.enDalton) ? state.type : 0;
+    return state.enDalton ? state.type : 0;
   }
 
   // color→óptica con ambas etapas: texAuditSrc queda tras el desenfoque pero ya incluye daltonismo GPU.
   function daltonAlreadyInAuditBuffer() {
-    if (state.view !== 'sim' || !state.enDalton || state.order !== 'color-optica') return false;
+    if (!state.enDalton || state.order !== 'color-optica') return false;
     const stages = buildStages();
     const hasDalton = stages.includes('dalton');
     const hasOpt = stages.some((s) => s === 'myopia' || s === 'astigma');
@@ -417,7 +415,7 @@
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
     gl.viewport(0, 0, W, H);
     const stages = buildStages();
-    if (state.view === 'sim' && stages.length) runPipeToScreen(stages, W, H);
+    if (stages.length) runPipeToScreen(stages, W, H);
     else { texAuditSrc = texColor; blitToScreen(W, H); }
 
     const now = performance.now();
@@ -528,7 +526,7 @@
   function computeConfusions() {
     confusions = {};
     // Confusiones entre objetos: solo con daltonismo activo (pares dicrómatas).
-    if (state.view !== 'sim' || !state.enDalton || state.type === 0) return;
+    if (!state.enDalton || state.type === 0) return;
     const ids = Object.keys(audit).filter(isFig);
     const t = state.type;
     const skipCpuSim = daltonAlreadyInAuditBuffer();
@@ -633,7 +631,7 @@
     set('type', 'type', Number); set('sev', 'sev', Number, 'sevV');
     set('az', 'az', Number, 'azV'); set('el', 'el', Number, 'elV');
     set('lightDist', 'lightDist', Number, 'lightDistV');
-    set('light', 'light', String); set('view', 'view', String);
+    set('light', 'light', String);
     set('order', 'order', String);
     set('myopiaD', 'myopiaD', Number, 'myopiaDV'); set('pupilMm', 'pupilMm', Number, 'pupilMmV');
     set('cylinderD', 'cylinderD', Number, 'cylinderDV'); set('axisDeg', 'axisDeg', Number, 'axisDegV');
@@ -653,7 +651,6 @@
     });
     window.addEventListener('keydown', (e) => {
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') return;
-      if (e.key === 'f' || e.key === 'F') { $('view').value = state.view === 'sim' ? 'orig' : 'sim'; $('view').dispatchEvent(new Event('input')); }
       if (e.key === 'h' || e.key === 'H') { $('heat').value = String((state.heat + 1) % 3); state.heat = Number($('heat').value); }
     });
     // Orbita: arrastrar. Clic sin arrastre: picking.

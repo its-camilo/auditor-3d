@@ -110,7 +110,7 @@ await mkdir(OUT, { recursive: true });
 await page.goto(BASE, { waitUntil: 'networkidle' });
 
 const base = {
-  view: 'sim', enDalton: false, enMyopia: false, enAstigma: false,
+  enDalton: false, enMyopia: false, enAstigma: false,
   showLight: true, az: 60, el: 35, lightDist: 4, light: 'blanca'
 };
 

@@ -34,21 +34,20 @@ Requisitos: navegador con **WebGL2** (Chrome, Brave, Firefox, Safari recientes).
 | Zoom | Rueda del ratón |
 | Seleccionar objeto para auditar | Clic en la escena |
 | Deseleccionar | Segundo clic en el mismo objeto (escena o lista) |
-| Vista original / simulada | Tecla **F** o selector «Vista» (apaga o enciende toda la cadena) |
+| Marcas de accesibilidad (contorno/patrón) | Tecla **H** o selector «Marcas»: rayas, doble línea, puntos WCAG; apagadas |
 | Condiciones | Panel **Condiciones:** casillas daltonismo, miopía (\|D\|, pupila), astigmatismo (cilindro, eje); select **Orden** (óptica→color / color→óptica). Cada etapa activa usa su shader (`miopia.frag`, `astigmatismo.frag`, `daltonismo.frag`) en ping-pong. |
 | Tipo y severidad | Selectores «Tipo» y «Severidad» (solo si daltonismo está activo) |
 | Luz | Azimut, elevación, **distancia (2–12 m, defecto 4 m)**, presets de color; casilla **marca del origen** — círculo amarillo 3D (`marcaluz`) o flecha 2D en el borde si la luz queda fuera del frustum |
 | Resumen auditoría | Línea superior del HUD: prefijo según condiciones (`sin condiciones`, `deutan + miopía 4 D`, etc.) + conteos de fallas y confusiones |
-| Marcas de accesibilidad | Tecla **H** o selector «Marcas»: contorno (defecto), patrón de relleno, apagadas |
 
 Leyenda de marcas (no dependen solo del color, SC 1.4.1): rayas = no se distingue del fondo; doble línea = se confunde con otro objeto; punteado = WCAG < 3:1.
 
 ## Arquitectura
 
 1. **Escena → FBO (MRT + profundidad).** `shaders/escena.vert|frag`: color lineal, ID y mapa de profundidad (picking y gather).
-2. **Cadena Pipe (ping-pong)** si Vista = simulada: etapas activas en orden elegido (`shaders/miopia.frag`, `shaders/astigmatismo.frag`, `shaders/daltonismo.frag`); buffers A/B RGBA16F; profundidad fija como `uDepth`. Vista original: `shaders/mostrar.frag` sin cadena.
+2. **Cadena Pipe (ping-pong):** etapas activas en orden elegido (`shaders/miopia.frag`, `shaders/astigmatismo.frag`, `shaders/daltonismo.frag`); buffers A/B RGBA16F; profundidad fija como `uDepth`. Si ninguna etapa está activa, `shaders/mostrar.frag` convierte la escena lineal a sRGB.
 3. **Heatmap** sobre IDs nítidos (`shaders/heatmap.frag`).
-4. **Marca de luz** (`shaders/marcaluz.vert|frag`), mismo aspecto en original y simulada; no escribe IDs.
+4. **Marca de luz** (`shaders/marcaluz.vert|frag`); no escribe IDs.
 
 **Picking:** IDs de la pasada de escena, sin desenfoque.
 
