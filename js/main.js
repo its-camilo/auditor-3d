@@ -26,7 +26,7 @@
     enDalton: true, enMyopia: false, enAstigma: false, order: 'optica-color',
     myopiaD: 3, pupilMm: 4, cylinderD: 1.5, axisDeg: 90,
     showLight: true,
-    az: 60, el: 35, light: 'blanca', ambient: 0.2, intensity: 0.8,
+    az: 60, el: 35, lightDist: 7, light: 'blanca', ambient: 0.2, intensity: 0.8,
     heat: 1, selected: 0,
     yaw: 0.0, pitch: 0.18, radius: 9.5, target: [0, 1.4, -0.6],
     dirty: true, lastAudit: 0
@@ -143,39 +143,53 @@
     state.dirty = true;
   }
 
-  // Proyecta la direccion de luz al HUD en NDC; recorta al borde si sale del frustum.
-  function lightHudNdc(vp, light) {
-    const t = state.target;
-    let x = 0; let y = 0; let valid = false;
-    for (const d of [1.5, 3, 5, 8, 12, 18, 28]) {
-      const c = m4.transformPoint(vp, [
-        t[0] + light.dir[0] * d,
-        t[1] + light.dir[1] * d,
-        t[2] + light.dir[2] * d
-      ]);
-      if (Math.abs(c[3]) < 1e-5) continue;
-      const nx = c[0] / c[3], ny = c[1] / c[3], nz = c[2] / c[3];
-      if (c[3] > 0 && nz > -1 && nz < 1 && Math.abs(nx) <= 1.15 && Math.abs(ny) <= 1.15) {
-        x = nx; y = ny; valid = true; break;
-      }
-    }
-    if (!valid) {
-      const c0 = m4.transformPoint(vp, t);
-      const c1 = m4.transformPoint(vp, [t[0] + light.dir[0], t[1] + light.dir[1], t[2] + light.dir[2]]);
-      if (Math.abs(c1[3]) > 1e-5 && Math.abs(c0[3]) > 1e-5) {
-        x = c1[0] / c1[3] - c0[0] / c0[3];
-        y = c1[1] / c1[3] - c0[1] / c0[3];
-        const s = 4 / (Math.hypot(x, y) || 1);
-        x *= s; y *= s;
-      }
-    }
+  // Una sola posicion de luz por frame (compartida por escena.frag y marcaluz).
+  function currentLightPos() {
+    return A.lightPosFromAzEl(state.az, state.el, state.lightDist, state.target);
+  }
+
+  function lightMarkerClip(vp, pos) {
+    const c = m4.transformPoint(vp, pos);
+    return { x: c[0] / c[3], y: c[1] / c[3], z: c[2] / c[3], w: c[3] };
+  }
+
+  function lightMarkerVisible(clip) {
+    if (clip.w <= 0) return false;
+    return clip.z > -0.98 && clip.z < 0.98 && Math.abs(clip.x) <= 1.05 && Math.abs(clip.y) <= 1.05;
+  }
+
+  // Fallback 2D en el borde cuando la fuente sale del frustum o queda detras de la camara.
+  function lightHudNdc(vp, pos) {
+    const clip = lightMarkerClip(vp, pos);
+    let x = clip.x; let y = clip.y;
     let edge = 0;
+    if (clip.w <= 0) { x = -x; y = -y; edge = 1; }
+    if (!lightMarkerVisible(clip)) edge = 1;
     const maxR = 0.9;
-    if (!valid) edge = 1;
     const len = Math.hypot(x, y);
     if (len > maxR) { x = (x / len) * maxR; y = (y / len) * maxR; edge = 1; }
-  if (!valid && len < 1e-3) { x = light.dir[0] * 0.75; y = light.dir[1] * 0.75 + light.dir[2] * 0.2; edge = 1; }
     return { x, y, edge, angle: Math.atan2(y, x) };
+  }
+
+  function drawLightMarker3D(vp, eye, pos, w, h) {
+    const ml = P.marcaluz;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(ml.p);
+    gl.uniform3fv(ml.loc.uCenter, pos);
+    gl.uniform3fv(ml.loc.uEye, eye);
+    gl.uniform1f(ml.loc.uRadius, 0.14);
+    gl.uniformMatrix4fv(ml.loc.uViewProj, false, vp);
+    gl.uniform2f(ml.loc.uResolution, w, h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texDepth);
+    gl.uniform1i(ml.loc.uDepth, 0);
+    gl.bindVertexArray(markerVao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disable(gl.BLEND);
   }
 
   function drawLightHud(w, h, hud) {
@@ -318,16 +332,38 @@
     const r = state.radius, cy = Math.cos(state.pitch);
     return [state.target[0] + r * cy * Math.sin(state.yaw), state.target[1] + r * Math.sin(state.pitch), state.target[2] + r * cy * Math.cos(state.yaw)];
   }
-  function lightNow() {
-    return { dir: A.lightDir(state.az, state.el), color: S.LIGHTS[state.light].color, ambient: state.ambient, intensity: state.intensity };
+  function lightParams(uLightPos) {
+    return {
+      pos: uLightPos,
+      color: S.LIGHTS[state.light].color,
+      ambient: state.ambient,
+      intensity: state.intensity
+    };
+  }
+
+  function conditionLabel() {
+    if (state.view === 'orig') return 'original';
+    const parts = [];
+    if (state.enDalton && state.type !== 0) parts.push(A.TYPES[state.type]);
+    else if (state.enDalton) parts.push('daltonismo neutro');
+    if (state.enMyopia) parts.push(`miopía ${state.myopiaD} D`);
+    if (state.enAstigma) parts.push(`astigmatismo ${state.cylinderD} D`);
+    return parts.length ? parts.join(' + ') : 'sin condiciones';
+  }
+
+  function metricsIndex() {
+    return (state.view === 'sim' && state.enDalton) ? state.type : 0;
   }
 
   // ---------------- render ----------------
-  let P = {}, meshes = {}, quad;
+  let P = {}, meshes = {}, quad, markerVao;
   const IDENTITY4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   function render() {
     resize();
-    const e = eye(), light = lightNow();
+    const e = eye();
+    const uLightPos = currentLightPos();
+    window.__lastLightPos = uLightPos;
+    const light = lightParams(uLightPos);
     const vp = m4.mul(m4.persp(FOVY, W / H, NEAR, FAR), m4.lookAt(e, state.target, [0, 1, 0]));
 
     // Pasada 1: escena -> FBO (color lineal + ID)
@@ -339,7 +375,8 @@
     gl.enable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
     const ps = P.scene; gl.useProgram(ps.p);
     gl.uniformMatrix4fv(ps.loc.uViewProj, false, vp);
-    gl.uniform3fv(ps.loc.uLightDir, light.dir);
+    gl.uniform3fv(ps.loc.uLightPos, uLightPos);
+    gl.uniform1f(ps.loc.uAttenK, A.LIGHT_ATTEN_K);
     gl.uniform3fv(ps.loc.uLightColor, light.color);
     gl.uniform1f(ps.loc.uAmbient, light.ambient);
     gl.uniform1f(ps.loc.uIntensity, light.intensity);
@@ -375,7 +412,11 @@
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.BLEND);
 
-    if (state.showLight) drawLightHud(W, H, lightHudNdc(vp, light));
+    if (state.showLight) {
+      const clip = lightMarkerClip(vp, uLightPos);
+      if (lightMarkerVisible(clip)) drawLightMarker3D(vp, e, uLightPos, W, H);
+      else drawLightHud(W, H, lightHudNdc(vp, uLightPos));
+    }
     gl.bindVertexArray(null);
   }
 
@@ -479,14 +520,14 @@
     // Lista de objetos ordenada por gravedad para el tipo actual.
     const rank = [0, 1, 3, 2]; // falla > confusión > aviso > bien
     const rows = Object.keys(audit).filter(isFig).map((id) => ({ id: Number(id), a: audit[id] }))
-      .sort((p, q) => rank[stOf(q.id)] - rank[stOf(p.id)] || p.a.metrics[state.type].dE - q.a.metrics[state.type].dE);
+      .sort((p, q) => rank[stOf(q.id)] - rank[stOf(p.id)] || p.a.metrics[metricsIndex()].dE - q.a.metrics[metricsIndex()].dE);
     $('list').innerHTML = rows.map(({ id, a }) => {
-      const m = a.metrics[state.type], st = stOf(id);
+      const m = a.metrics[metricsIndex()], st = stOf(id);
       return `<li><button data-id="${id}" class="st${st}${id === state.selected ? ' sel' : ''}">${ICON[st]} ${S.byId(id).name}<span>ΔE ${m.dE.toFixed(3)} · ${m.wcag.toFixed(2)}:1</span></button></li>`;
     }).join('');
     const nFail = rows.filter((r) => stOf(r.id) === 2).length;
     const nPairs = Object.values(confusions).reduce((n, l) => n + l.length, 0) / 2;
-    $('summary').textContent = `${A.TYPES[state.type]}: ${nFail} de ${rows.length} objetos no se distinguen de su fondo · ${nPairs} pares se confunden entre sí`;
+    $('summary').textContent = `${conditionLabel()}: ${nFail} de ${rows.length} objetos no se distinguen de su fondo · ${nPairs} pares se confunden entre sí`;
 
     const box = $('detail');
     const a = audit[state.selected], o = S.byId(state.selected);
@@ -497,11 +538,12 @@
     let html = `<h3>${o.name}</h3><p class="muted">Fondo adyacente principal: ${bgName}</p>`;
     html += `<div class="sw"><span style="background:${A.linToHex(A.clamp01(a.obj))}"></span>objeto <span style="background:${A.linToHex(A.clamp01(a.bg))}"></span>fondo (render)</div>`;
     html += '<table><tr><th>Visión</th><th>ΔE OKLab</th><th>WCAG</th><th>Estado</th></tr>';
-    a.metrics.forEach((m, t) => { html += `<tr${t === state.type ? ' class="cur"' : ''}><td>${m.type}</td><td>${m.dE.toFixed(3)}</td><td>${m.wcag.toFixed(2)}:1</td><td>${ICON[a.status[t]]} ${LABEL[a.status[t]]}</td></tr>`; });
+    const mi = metricsIndex();
+    a.metrics.forEach((m, t) => { html += `<tr${t === mi ? ' class="cur"' : ''}><td>${m.type}</td><td>${m.dE.toFixed(3)}</td><td>${m.wcag.toFixed(2)}:1</td><td>${ICON[a.status[t]]} ${LABEL[a.status[t]]}</td></tr>`; });
     html += '</table>';
     const conf = confusions[o.id] || [];
     if (conf.length) {
-      html += `<p class="conf">≈ En ${A.TYPES[state.type]} se confunde con: ` + conf.map((c) => `<button class="link" data-id="${c.other}">${S.byId(c.other).name}</button> (ΔE ${c.dE.toFixed(3)}; normal ${c.dEn.toFixed(3)})`).join(', ') + '. Si la forma es distinta, la forma los separa.</p>';
+      html += `<p class="conf">≈ Con ${conditionLabel()} se confunde con: ` + conf.map((c) => `<button class="link" data-id="${c.other}">${S.byId(c.other).name}</button> (ΔE ${c.dE.toFixed(3)}; normal ${c.dEn.toFixed(3)})`).join(', ') + '. Si la forma es distinta, la forma los separa.</p>';
     }
     const worst = Math.max(a.status[1], a.status[2], a.status[3]);
     if (worst > 0) {
@@ -531,10 +573,13 @@
     const set = (id, key, parse, out) => {
       const el = $(id);
       const f = () => { state[key] = parse(el.value); if (out) $(out).textContent = el.value; state.dirty = true; if (key === 'type') { uploadStatus(); updateHUD(); } };
-      el.addEventListener('input', f); f();
+      el.addEventListener('input', f);
+      el.addEventListener('change', f);
+      f();
     };
     set('type', 'type', Number); set('sev', 'sev', Number, 'sevV');
     set('az', 'az', Number, 'azV'); set('el', 'el', Number, 'elV');
+    set('lightDist', 'lightDist', Number, 'lightDistV');
     set('light', 'light', String); set('view', 'view', String);
     set('order', 'order', String);
     set('myopiaD', 'myopiaD', Number, 'myopiaDV'); set('pupilMm', 'pupilMm', Number, 'pupilMmV');
@@ -588,11 +633,12 @@
     try {
       const qv = await src('shaders/daltonizador.vert');
       const paths = ['shaders/escena.vert', 'shaders/escena.frag', 'shaders/daltonismo.frag', 'shaders/miopia.frag',
-        'shaders/astigmatismo.frag', 'shaders/heatmap.frag', 'shaders/mostrar.frag', 'shaders/luzhud.frag'];
-      const [sv, sf, dalf, mf, af, hf, showf, lhf] = await Promise.all(paths.map(src));
+        'shaders/astigmatismo.frag', 'shaders/heatmap.frag', 'shaders/mostrar.frag',
+        'shaders/luzhud.frag', 'shaders/marcaluz.vert', 'shaders/marcaluz.frag'];
+      const [sv, sf, dalf, mf, af, hf, showf, lhf, mlv, mlf] = await Promise.all(paths.map(src));
       P.scene = program(sv, sf); P.dalton = program(qv, dalf); P.miopia = program(qv, mf);
       P.astigma = program(qv, af); P.heat = program(qv, hf); P.mostrar = program(qv, showf);
-      P.luzhud = program(qv, lhf);
+      P.luzhud = program(qv, lhf); P.marcaluz = program(mlv, mlf);
       // Modelos OBJ locales: un VAO por objeto auditable (nombre "o" = campo part).
       const files = [...new Set(S.OBJECTS.map((o) => o.model))];
       const parsed = {};
@@ -602,6 +648,14 @@
         if (part) meshes[o.id] = meshVAO(part); else console.warn('Falta la parte', o.part, 'en', o.model);
       });
       quad = quadVAO();
+      markerVao = (() => {
+        const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+        const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        gl.bindVertexArray(null);
+        return vao;
+      })();
       resize(); uploadStatus(); bind();
       requestAnimationFrame(loop);
     } catch (err) {

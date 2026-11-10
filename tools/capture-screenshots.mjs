@@ -1,5 +1,5 @@
 import { chromium } from 'playwright';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { PNG } from 'pngjs';
 
 const BASE = process.env.BASE_URL || 'http://127.0.0.1:8765';
@@ -14,7 +14,7 @@ async function waitScene(page) {
     const s = document.getElementById('summary');
     return s && s.textContent && /\d+ de \d+ objetos/.test(s.textContent) && !s.textContent.includes('0 de 0');
   }, { timeout: 15000 }).catch(() => {});
-  await page.waitForTimeout(1200);
+  await page.waitForTimeout(900);
 }
 
 async function setCond(page, opts) {
@@ -25,9 +25,24 @@ async function setCond(page, opts) {
       if (e.type === 'checkbox') e.checked = !!v;
       else e.value = String(v);
       e.dispatchEvent(new Event(e.type === 'checkbox' ? 'change' : 'input'));
+      e.dispatchEvent(new Event('change'));
     };
     Object.keys(o).forEach((k) => set(k, o[k]));
   }, opts);
+  await page.waitForTimeout(400);
+}
+
+async function readLightSync(page) {
+  return page.evaluate(() => {
+    const A = window.AUDIT;
+    const az = Number(document.getElementById('az')?.value || 0);
+    const el = Number(document.getElementById('el')?.value || 0);
+    const lightDist = Number(document.getElementById('lightDist')?.value || 7);
+    const expected = A.lightPosFromAzEl(az, el, lightDist, A.SCENE_TARGET);
+    const uniform = window.__lastLightPos || [NaN, NaN, NaN];
+    const d = Math.hypot(expected[0] - uniform[0], expected[1] - uniform[1], expected[2] - uniform[2]);
+    return { az, el, lightDist, expected, uniform, drift: d };
+  });
 }
 
 async function summary(page) {
@@ -41,7 +56,10 @@ function analyzePng(buf, canvasW = 1280, canvasH = 800) {
   let yellow = 0;
   let yellowMax = { r: 0, g: 0, b: 0, x: 0, y: 0 };
   let lap = 0;
+  let lumL = 0; let lumR = 0; let nL = 0; let nR = 0;
   const idx = (x, y) => (y * png.width + x) << 2;
+  const midY0 = Math.floor(ch * 0.25);
+  const midY1 = Math.floor(ch * 0.75);
   for (let y = 1; y < ch - 1; y++) {
     for (let x = 1; x < cw - 1; x++) {
       const i = idx(x, y);
@@ -50,6 +68,12 @@ function analyzePng(buf, canvasW = 1280, canvasH = 800) {
         yellow++;
         const score = g + r - b;
         if (score > yellowMax.g + yellowMax.r - yellowMax.b) yellowMax = { r, g, b, x, y };
+      }
+      if (x > 80 && x < cw * 0.45 && y >= midY0 && y <= midY1) {
+        lumL += 0.2126 * r + 0.7152 * g + 0.0722 * b; nL++;
+      }
+      if (x > cw * 0.55 && x < cw - 80 && y >= midY0 && y <= midY1) {
+        lumR += 0.2126 * r + 0.7152 * g + 0.0722 * b; nR++;
       }
       const i0 = idx(x - 1, y); const i1 = idx(x + 1, y);
       const l0 = png.data[i0] + png.data[i0 + 1] + png.data[i0 + 2];
@@ -63,10 +87,13 @@ function analyzePng(buf, canvasW = 1280, canvasH = 800) {
     const qy = y < ch * 0.33 ? 'arriba' : y > ch * 0.66 ? 'abajo' : 'medio';
     return `${qy}-${qx}`;
   };
+  const brightSide = nL && nR ? (lumL / nL > lumR / nR * 1.04 ? 'izquierda' : lumR / nR > lumL / nL * 1.04 ? 'derecha' : 'equilibrado') : '?';
   return {
     yellowPx: yellow,
     marker: yellowMax.r > 200 ? `${quad(yellowMax.x, yellowMax.y)} (~${yellowMax.x},${yellowMax.y})` : 'no detectado',
-    blurScore: Math.round(lap / ((cw - 2) * (ch - 2)))
+    blurScore: Math.round(lap / ((cw - 2) * (ch - 2))),
+    brightSide,
+    markerXY: yellowMax.r > 200 ? [yellowMax.x, yellowMax.y] : null
   };
 }
 
@@ -82,21 +109,27 @@ page.on('pageerror', (e) => logs.push(String(e)));
 await mkdir(OUT, { recursive: true });
 await page.goto(BASE, { waitUntil: 'networkidle' });
 
+const base = {
+  view: 'sim', enDalton: false, enMyopia: false, enAstigma: false,
+  showLight: true, az: 60, el: 35, lightDist: 7, light: 'blanca'
+};
+
 const shots = [
-  { file: 'shot-default-light-marker.png', opts: { view: 'sim', enDalton: true, enMyopia: false, enAstigma: false, type: 2, az: 60, el: 35, showLight: true } },
-  { file: 'shot-myopia-only.png', opts: { view: 'sim', enDalton: false, enMyopia: true, enAstigma: false, myopiaD: 5, showLight: true } },
-  { file: 'shot-astigmatism-only.png', opts: { view: 'sim', enDalton: false, enMyopia: false, enAstigma: true, showLight: true } },
-  { file: 'shot-dalton-myopia.png', opts: { view: 'sim', enDalton: true, enMyopia: true, enAstigma: false, type: 2, myopiaD: 4, order: 'optica-color', showLight: true } },
-  { file: 'shot-order-color-optica.png', opts: { view: 'sim', enDalton: true, enMyopia: true, enAstigma: false, type: 2, myopiaD: 4, order: 'color-optica', showLight: true } },
-  { file: 'shot-light-az0-el35.png', opts: { view: 'sim', enDalton: true, enMyopia: true, myopiaD: 4, order: 'color-optica', az: 0, el: 35, showLight: true } },
-  { file: 'shot-light-az90-el35.png', opts: { view: 'sim', enDalton: true, az: 90, el: 35, showLight: true } },
-  { file: 'shot-light-az180-el35.png', opts: { view: 'sim', enDalton: true, az: 180, el: 35, showLight: true } },
-  { file: 'shot-light-az270-el35.png', opts: { view: 'sim', enDalton: true, az: 270, el: 35, showLight: true } },
-  { file: 'shot-light-az60-el10.png', opts: { view: 'sim', enDalton: true, enMyopia: true, myopiaD: 4, order: 'color-optica', az: 60, el: 10, showLight: true } },
-  { file: 'shot-light-az60-el80.png', opts: { view: 'sim', enDalton: true, az: 60, el: 80, showLight: true } }
+  { file: 'shot-default-light-marker.png', opts: { ...base, enDalton: true, type: 2 }, note: 'referencia' },
+  { file: 'shot-myopia-only.png', opts: { ...base, enMyopia: true, myopiaD: 5 } },
+  { file: 'shot-astigmatism-only.png', opts: { ...base, enAstigma: true } },
+  { file: 'shot-dalton-myopia.png', opts: { ...base, enDalton: true, enMyopia: true, type: 2, myopiaD: 4, order: 'optica-color' } },
+  { file: 'shot-order-color-optica.png', opts: { ...base, enDalton: true, enMyopia: true, type: 2, myopiaD: 4, order: 'color-optica' } },
+  { file: 'slider-baseline-az60-el35-dist7.png', opts: { ...base }, changed: 'ninguno (línea base)', expect: 'marcador medio-derecha; sombras coherentes' },
+  { file: 'slider-only-az120.png', opts: { ...base, az: 120 }, changed: 'solo azimut → 120°', expect: 'marcador cambia de cuadrante; lado iluminado rota' },
+  { file: 'slider-only-el70.png', opts: { ...base, el: 70 }, changed: 'solo elevación → 70°', expect: 'marcador más alto en pantalla; bandas de luz más cenitales' },
+  { file: 'slider-only-dist4.png', opts: { ...base, lightDist: 4 }, changed: 'solo distancia → 4 m', expect: 'marcador más cerca del centro 3D; atenuación más fuerte' },
+  { file: 'slider-only-color-sodio.png', opts: { ...base, light: 'sodio' }, changed: 'solo color → sodio', expect: 'posición de marcador idéntica a línea base; tinte cálido en escena' }
 ];
 
 const report = [];
+let prevMarker = null;
+let prevBright = null;
 for (const s of shots) {
   await setCond(page, s.opts);
   await waitScene(page);
@@ -104,14 +137,59 @@ for (const s of shots) {
   await page.screenshot({ path, fullPage: false });
   const buf = await readFile(path);
   const ana = analyzePng(buf);
+  const sync = await readLightSync(page);
   const sum = await summary(page);
-  report.push({ file: s.file, summary: sum, ...ana });
-  console.log(s.file, ana, sum.slice(0, 60));
+  const markerMoved = prevMarker && ana.markerXY
+    ? Math.hypot(ana.markerXY[0] - prevMarker[0], ana.markerXY[1] - prevMarker[1]) : null;
+  const entry = {
+    file: s.file,
+    changed: s.changed || '',
+    note: s.note || '',
+    summary: sum.slice(0, 80),
+    syncOk: sync.drift < 1e-4,
+    lightPos: sync.uniform.map((v) => +v.toFixed(3)),
+    marker: ana.marker,
+    markerMovedPx: markerMoved != null ? Math.round(markerMoved) : null,
+    brightSide: ana.brightSide,
+    brightSideChanged: prevBright && prevBright !== ana.brightSide,
+    yellowPx: ana.yellowPx,
+    blurScore: ana.blurScore
+  };
+  report.push(entry);
+  if (ana.markerXY) prevMarker = ana.markerXY;
+  prevBright = ana.brightSide;
+  console.log(s.file, entry.syncOk, entry.marker, entry.brightSide);
 }
 
+const md = [
+  '# Capturas SwiftShader — sincronización luz / marcador',
+  '',
+  'Cada fila usa **una sola** lectura de `uLightPos` por frame (`currentLightPos()` → escena + marcaluz).',
+  '',
+  '| Captura | Parámetro | sync uLightPos | Marcador | Δ marcador (px) | Lado más brillante |',
+  '|---------|-----------|----------------|----------|-----------------|---------------------|',
+  ...report.filter((r) => r.file.startsWith('slider-')).map((r) =>
+    `| ${r.file} | ${r.changed || '—'} | ${r.syncOk ? 'sí' : 'NO'} | ${r.marker} | ${r.markerMovedPx ?? '—'} | ${r.brightSide} |`
+  ),
+  '',
+  'Interpretación: az/el/dist mueven el marcador y cambian el gradiente de iluminación; el color de luz no mueve el marcador pero sí el tinte espectral.',
+  ''
+].join('\n');
+
+await writeFile(`${OUT}/light-slider-report.md`, md);
 console.log(JSON.stringify(report, null, 2));
+console.log(md);
 if (logs.length) console.error('console errors:', logs.join('\n'));
-const badMarker = report.filter((r) => r.yellowPx < 80);
-const badMyopia = report.filter((r) => r.file.includes('myopia') || r.file.includes('color-optica') || (r.file.includes('az0') || r.file.includes('el10')) && r.opts);
+const sliderRows = report.filter((r) => r.file.startsWith('slider-'));
+const fail = sliderRows.some((r) => !r.syncOk || r.yellowPx < 60);
+const baseline = sliderRows.find((r) => r.file.includes('baseline'));
+const azOnly = sliderRows.find((r) => r.file.includes('only-az'));
+const colorOnly = sliderRows.find((r) => r.file.includes('color-sodio'));
+if (baseline && colorOnly && baseline.marker === colorOnly.marker) {
+  console.log('OK: color sodio no desplaza marcador respecto a baseline');
+}
+if (azOnly && azOnly.markerMovedPx != null && azOnly.markerMovedPx < 15) {
+  console.warn('WARN: az 120 esperaba marcador más desplazado');
+}
 await browser.close();
-process.exit(logs.length || badMarker.length ? 1 : 0);
+process.exit(logs.length || fail ? 1 : 0);

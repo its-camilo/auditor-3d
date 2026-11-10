@@ -2,19 +2,30 @@
  * Verifica con numeros la Proposicion 1 de la revision teorica y calcula el
  * "mapa de angulos ciegos" de cada par objeto/fondo de scene.js.
  * Ejecutar: node tools/teoria-conmutacion.js
- *
- * Proposicion 1. Sea S una matriz de simulacion lineal con S*1 = 1 (conserva el
- * blanco) y sea la luz blanca. Blinn-Phong da I = a*kd + s*1 con a, s escalares.
- * Entonces S*I = a*(S*kd) + s*1: simular despues de iluminar es igual que
- * iluminar un material ya simulado. Falla solo por el clamp y por el semiplano
- * de Brettel (tritan). Con luz de color L, S*(kd o L) != (S*kd) o L.
  */
 const A = require('../js/audit-core.js');
 const M = require('../js/machado.js');
 const { OBJECTS, LIGHTS, byId } = require('../js/scene.js');
 
 const SEV = Number(process.argv[2] || 1.0);
+const LIGHT_DIST = 7;
+const TARGET = A.SCENE_TARGET;
+// Ojo aproximado con la camara por defecto (main.js): radio 9.5, pitch 0.18, yaw 0.
+const EYE = [
+  TARGET[0] + 9.5 * Math.cos(0.18) * Math.sin(0),
+  TARGET[1] + 9.5 * Math.sin(0.18),
+  TARGET[2] + 9.5 * Math.cos(0.18) * Math.cos(0)
+];
 const line = (s) => console.log(s);
+
+function mkLight(az, el, color = [1, 1, 1]) {
+  return {
+    pos: A.lightPosFromAzEl(az, el, LIGHT_DIST, TARGET),
+    color,
+    ambient: 0.2,
+    intensity: 0.8
+  };
+}
 
 // ---------- 1. S*1 = 1 ----------
 line('1) Conservacion del blanco: max |S*1 - 1| por tipo (severidad 0..1)');
@@ -34,11 +45,14 @@ function commutationError(lightColor, trials) {
   for (let i = 0; i < trials; i++) {
     const kd = rnd().map((x) => x * 0.9);
     const mat = { ks: Math.random() * 0.5, shininess: 32 };
-    const light = { dir: A.lightDir(Math.random() * 360, 10 + Math.random() * 70), color: lightColor, ambient: 0.2, intensity: 0.8 };
+    const az = Math.random() * 360;
+    const el = 10 + Math.random() * 70;
+    const light = mkLight(az, el, lightColor);
     const n = A.norm([Math.random() - 0.5, Math.random(), Math.random() - 0.5]);
-    const t = 1 + (i % 2); // Machado protan/deutan (lineales puros)
-    const left = A.simulate(t, SEV, A.blinnPhong(kd, mat, n, light, [0, 0.3, 1]), true);
-    const right = A.blinnPhong(A.simulate(t, SEV, kd, true), mat, n, light, [0, 0.3, 1]);
+    const world = [Math.random() * 0.4, 0.8 + Math.random(), -0.8 + Math.random() * 0.6];
+    const t = 1 + (i % 2);
+    const left = A.simulate(t, SEV, A.blinnPhong(kd, mat, n, light, world, EYE), true);
+    const right = A.blinnPhong(A.simulate(t, SEV, kd, true), mat, n, light, world, EYE);
     const e = A.dEok(A.clamp01(left), A.clamp01(right));
     worst = Math.max(worst, e); mean += e / trials;
   }
@@ -51,23 +65,22 @@ for (const key of Object.keys(LIGHTS)) {
 }
 
 // ---------- 3. Mapa de angulos ciegos por par ----------
-// Barre azimut y elevacion de la luz. Para cada par objeto/fondo y cada tipo
-// busca el peor caso (minimo dE_OK simulado) y el angulo donde ocurre (theta*).
 line(`\n3) Angulos ciegos (luz blanca, severidad ${SEV}). Umbral dE_OK ${A.TH.TAU_DE}, WCAG ${A.TH.WCAG}:1`);
 line('   Par'.padEnd(52) + 'tipo     dE min   theta* (az,el)   WCAG en theta*   dE-rango       Yobj/Yfondo');
-const view = [0, 0.3, 1];
 for (const o of OBJECTS) {
   if (!o.bg) continue;
   const b = byId(o.bg);
   const kdO = A.hexToLin(o.hex), kdB = A.hexToLin(b.hex);
   const sameNormal = A.dot(A.norm(o.n), A.norm(b.n)) > 0.999;
+  const worldO = A.worldOnNormal(TARGET, o.n);
+  const worldB = A.worldOnNormal(TARGET, b.n);
   for (let t = 1; t <= 3; t++) {
     let best = null, maxDE = 0, rMin = Infinity, rMax = 0;
     for (let az = -90; az <= 90; az += 5) {
       for (let el = 5; el <= 85; el += 5) {
-        const light = { dir: A.lightDir(az, el), color: [1, 1, 1], ambient: 0.2, intensity: 0.8 };
-        const io = A.blinnPhong(kdO, { ks: o.ks, shininess: o.sh }, o.n, light, view);
-        const ib = A.blinnPhong(kdB, { ks: b.ks, shininess: b.sh }, b.n, light, view);
+        const light = mkLight(az, el, [1, 1, 1]);
+        const io = A.blinnPhong(kdO, { ks: o.ks, shininess: o.sh }, o.n, light, worldO, EYE);
+        const ib = A.blinnPhong(kdB, { ks: b.ks, shininess: b.sh }, b.n, light, worldB, EYE);
         const so = A.simulate(t, SEV, io), sb = A.simulate(t, SEV, ib);
         const dE = A.dEok(so, sb);
         maxDE = Math.max(maxDE, dE);

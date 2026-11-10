@@ -29,6 +29,16 @@ Reutiliza la simulación del Proyecto 1. `uOutputLinear = 1` si hay otra etapa d
 
 Por defecto: **óptica → color** (primero la imagen retinal borrosa, luego la simulación de conos). La opción **color → óptica** intercambia el orden; el resultado **no conmuta** (como en el capítulo Pipe).
 
+## Luz puntual y marcador 3D
+
+La iluminación de escena usa **Blinn–Phong con luz puntual** en `uLightPos` (mismo vector que `audit-core.js`):
+
+- Dirección en cada fragmento: `L = normalize(uLightPos - vWorld)`.
+- Atenuación inversa cuadrática suavizada: `1 / (1 + k·d²)` con `k = 0,035` (`LIGHT_ATTEN_K`).
+- Azimut, elevación y **distancia** (2–12 m) definen la posición dentro del volumen del andén (`lightPosFromAzEl`).
+- El marcador billboard (`shaders/marcaluz.*`) se dibuja en **la misma posición** que el uniforme de la pasada de escena; no hay copia cacheada en otro estado. Cada cambio de slider dispara `render()` y actualiza sombreado y marcador en el mismo frame.
+- Si la luz queda fuera del frustum o detrás de la cámara, el fallback 2D (`luzhud.frag`) indica el azimut en el borde del canvas.
+
 ## Auditoría y picking
 
 - **Picking e IDs del heatmap:** siempre el buffer de la pasada de escena, **sin desenfoque**.

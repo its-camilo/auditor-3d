@@ -83,8 +83,9 @@ Derivación paso a paso de los números del HUD: sección **4.1** de `docs/revis
 | Multipass / ping-pong | `runPipeToScreen()` en `js/main.js` | Pipe del notebook Visual |
 | Miopía (DOF / CoC) | `shaders/miopia.frag` | Dioptrías, pupila, gather espiral |
 | Astigmatismo anisotrópico | `shaders/astigmatismo.frag` | Cilindro + eje |
-| Origen de la luz (UI) | `shaders/luzhud.frag` + `lightHudNdc()` | Overlay 2D, recorte al borde |
-| Blinn-Phong | `shaders/escena.frag`, `blinnPhong()` en `js/audit-core.js` | Misma fórmula en GPU y CPU |
+| Posición de luz (UI) | `currentLightPos()` en `js/main.js` → `uLightPos` en escena + `marcaluz` | Una sola fuente por frame |
+| Marcador 3D / fallback | `shaders/marcaluz.*`, `shaders/luzhud.frag` | Billboard con oclusión por `texDepth`; HUD 2D si fuera del frustum |
+| Blinn-Phong (luz puntual) | `shaders/escena.frag`, `blinnPhong()` en `js/audit-core.js` | `L = normalize(pos - x)`, atenuación `k = 0,035` |
 | Proposición 1 (luz blanca) | `tools/teoria-conmutacion.js` | ΔE ≈ 0 con D65; error con luz de color |
 | Fondo adyacente WCAG | `runAudit()` en `js/main.js` | CPU, anillo 6 px (JFA pendiente) |
 | ΔE + WCAG + sugerencia | `pairMetrics()`, `suggest()` en `js/audit-core.js` | OKLab / OKLCH |

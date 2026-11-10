@@ -1,19 +1,25 @@
 #version 300 es
-// marcaluz.frag — círculo amarillo de referencia (UI, no entra en auditoría ni IDs).
-// uBehind: anillo punteado si la fuente cae detrás de la camara (luz aun valida en shaders).
+// marcaluz.frag — disco emisivo en la fuente; ocluye contra texDepth de la escena.
 precision highp float;
 in vec2 vUv;
-uniform float uBehind;
+in vec3 vWorld;
+uniform sampler2D uDepth;
+uniform mat4 uViewProj;
+uniform vec2 uResolution;
 out vec4 outColor;
+
 void main() {
+  vec4 clip = uViewProj * vec4(vWorld, 1.0);
+  if (clip.w <= 0.0) discard;
+  vec2 ndc = clip.xy / clip.w;
+  vec2 uv = ndc * 0.5 + 0.5;
+  if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
+  float sceneD = texture(uDepth, uv).r;
+  float fragD = clip.z / clip.w * 0.5 + 0.5;
+  if (fragD > sceneD + 0.002) discard;
   float r = length(vUv);
-  float alpha = smoothstep(1.05, 0.85, r);
-  float ring = smoothstep(0.92, 0.78, r) * (1.0 - smoothstep(0.78, 0.62, r));
-  vec3 col = mix(vec3(1.0, 0.85, 0.1), vec3(1.0, 0.95, 0.45), ring);
-  if (uBehind > 0.5) {
-    float dash = step(0.55, fract(atan(vUv.y, vUv.x) * 4.0));
-    col *= mix(0.35, 1.0, dash);
-    alpha *= 0.85;
-  }
-  outColor = vec4(col, alpha);
+  float disc = smoothstep(1.05, 0.82, r);
+  float core = smoothstep(0.35, 0.1, r);
+  vec3 col = mix(vec3(1.0, 0.82, 0.05), vec3(1.0, 0.98, 0.65), core);
+  outColor = vec4(col, disc * 0.95);
 }
