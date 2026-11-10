@@ -5,3 +5,7 @@ __pycache__/
 .python-version
 .vercel/
 *.log
+.playwright-mcp/
+node_modules/
+package-lock.json
+package.json

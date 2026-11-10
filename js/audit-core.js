@@ -67,23 +67,45 @@
     return raw ? out : clamp01(out);
   }
 
-  // ---------- Blinn-Phong (igual que escena.frag) ----------
-  // Devuelve el color lineal de un punto con albedo kd, normal n, luz l, vista v.
-  // light = { dir, color, ambient, intensity }, mat = { kd, ks, shininess }.
-  function blinnPhong(kd, mat, n, light, v) {
-    const L = norm(light.dir), N = norm(n), V = norm(v);
+  // Atenuacion inversa cuadratica suave (escena.frag uAttenK): 1 / (1 + k d^2).
+  const LIGHT_ATTEN_K = 0.035;
+  const SCENE_TARGET = [0, 1.4, -0.6];
+
+  // ---------- Blinn-Phong punto (igual que escena.frag) ----------
+  // light = { pos, color, ambient, intensity }, worldPos y eye en mundo.
+  function blinnPhong(kd, mat, n, light, worldPos, eye) {
+    const toL = [light.pos[0] - worldPos[0], light.pos[1] - worldPos[1], light.pos[2] - worldPos[2]];
+    const dist = Math.hypot(toL[0], toL[1], toL[2]);
+    const L = norm(toL);
+    const toV = [eye[0] - worldPos[0], eye[1] - worldPos[1], eye[2] - worldPos[2]];
+    const V = norm(toV);
     const H = norm(add(L, V));
+    const N = norm(n);
     const diff = Math.max(dot(N, L), 0);
     const spec = diff > 0 ? Math.pow(Math.max(dot(N, H), 0), mat.shininess) : 0;
-    const a = light.ambient + light.intensity * diff; // escalar difuso + ambiente
-    const s = light.intensity * mat.ks * spec;         // escalar especular
+    const atten = 1 / (1 + LIGHT_ATTEN_K * dist * dist);
+    const a = (light.ambient + light.intensity * diff) * atten;
+    const s = light.intensity * mat.ks * spec * atten;
     return add(scl(had(kd, light.color), a), scl(light.color, s));
   }
 
-  // Direccion de luz desde azimut y elevacion en grados (y hacia arriba).
+  // Direccion unitaria (azimut, elevacion) para colocar la fuente alrededor del target.
   function lightDir(azDeg, elDeg) {
     const az = azDeg * Math.PI / 180, el = elDeg * Math.PI / 180;
     return [Math.cos(el) * Math.sin(az), Math.sin(el), Math.cos(el) * Math.cos(az)];
+  }
+
+  function lightPosFromAzEl(azDeg, elDeg, dist, target = SCENE_TARGET) {
+    const dir = lightDir(azDeg, elDeg);
+    const p = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
+    p[1] = Math.min(3.6, Math.max(1.15, p[1]));
+    p[0] = Math.min(5, Math.max(-5, p[0]));
+    p[2] = Math.min(4, Math.max(-3, p[2]));
+    return p;
+  }
+
+  function worldOnNormal(target, n, dist = 0.6) {
+    return [target[0] + n[0] * dist, target[1] + n[1] * dist, target[2] + n[2] * dist];
   }
 
   // ---------- metricas de un par objeto/fondo ----------
@@ -131,7 +153,8 @@
 
   const api = { lin1, enc1, hexToLin, linToHex, mul3, had, add, scl, dot, norm, clamp01, Y, wcag,
     oklab, oklabToLin, dEok, toOklch, fromOklch, inGamut, simulate, blinnPhong, lightDir,
-    TYPES, pairMetrics, TH, status, suggest };
+    TYPES, pairMetrics, TH, status, suggest, LIGHT_ATTEN_K, SCENE_TARGET,
+    lightPosFromAzEl, worldOnNormal };
   if (typeof module !== 'undefined') module.exports = api;
   else root.AUDIT = api;
 })(typeof window !== 'undefined' ? window : globalThis);

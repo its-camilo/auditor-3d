@@ -2,9 +2,10 @@
  * Modelos: OBJ locales (models/) leídos con obj.js (sin librerías ni CDN).
  *
  * Pasadas por frame:
- *   1. Escena -> FBO con MRT: color lineal (RGBA16F) + ID (RGBA8). Blinn-Phong.
- *   2. Quad NDC con daltonizador.frag del Proyecto 1 (uInputLinear = 1) -> pantalla.
- *   3. Quad NDC con heatmap.frag (blend) -> pantalla.
+ *   1. Escena -> FBO con MRT: color lineal + ID + profundidad.
+ *   2. Pipe ping-pong (miopía, astigmatismo, daltonismo) si Vista = simulada.
+ *   3. Quad NDC con heatmap.frag (IDs sin desenfoque).
+ *   4. Marcador de origen de luz (billboard, sin IDs ni auditoría).
  * Auditoria (CPU, cuando algo cambia): readPixels de color e ID, promedio por
  * objeto y anillo de fondo adyacente, metricas con audit-core.js.
  * Picking: readPixels de 1 px en el buffer de IDs.
@@ -19,10 +20,14 @@
   const floatOK = !!gl.getExtension('EXT_color_buffer_float');
 
   // ---------------- estado ----------------
+  const NEAR = 0.1, FAR = 100, FOVY = 50 * Math.PI / 180;
   const state = {
     view: 'sim', type: 2, sev: 1.0,
-    az: 60, el: 35, light: 'blanca', ambient: 0.2, intensity: 0.8,
-    heat: 1, selected: 0, // heat: 0 apagado, 1 contorno, 2 patrón
+    enDalton: true, enMyopia: false, enAstigma: false, order: 'optica-color',
+    myopiaD: 3, pupilMm: 4, cylinderD: 1.5, axisDeg: 90,
+    showLight: true,
+    az: 60, el: 35, lightDist: 4, light: 'blanca', ambient: 0.2, intensity: 0.8,
+    heat: 1, selected: 0,
     yaw: 0.0, pitch: 0.18, radius: 9.5, target: [0, 1.4, -0.6],
     dirty: true, lastAudit: 0
   };
@@ -42,7 +47,17 @@
       const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
       return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -A.dot(x, e), -A.dot(y, e), -A.dot(z, e), 1]);
     },
-    ts(t, s) { return new Float32Array([s[0], 0, 0, 0, 0, s[1], 0, 0, 0, 0, s[2], 0, t[0], t[1], t[2], 1]); }
+    ts(t, s) { return new Float32Array([s[0], 0, 0, 0, 0, s[1], 0, 0, 0, 0, s[2], 0, t[0], t[1], t[2], 1]); },
+    transformPoint(m, p) {
+      const x = p[0], y = p[1], z = p[2];
+      const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+      return [
+        m[0] * x + m[4] * y + m[8] * z + m[12],
+        m[1] * x + m[5] * y + m[9] * z + m[13],
+        m[2] * x + m[6] * y + m[10] * z + m[14],
+        w
+      ];
+    }
   };
 
   // ---------------- shaders ----------------
@@ -81,7 +96,8 @@
   }
 
   // ---------------- FBO con MRT ----------------
-  let fbo = null, texColor = null, texId = null, depth = null, W = 0, H = 0;
+  let fbo = null, texColor = null, texId = null, texDepth = null, W = 0, H = 0;
+  let pipeFbo = [null, null], pipeTex = [null, null], texAuditSrc = null;
   function tex(internal, format, type, w, h) {
     const t = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, t);
     gl.texImage2D(gl.TEXTURE_2D, 0, internal, w, h, 0, format, type, null);
@@ -96,21 +112,201 @@
     const w = Math.max(1, Math.floor(canvas.clientWidth * dpr)), h = Math.max(1, Math.floor(canvas.clientHeight * dpr));
     if (w === W && h === H && fbo) return;
     W = w; H = h; canvas.width = w; canvas.height = h;
-    [texColor, texId].forEach((t) => t && gl.deleteTexture(t));
-    if (depth) gl.deleteRenderbuffer(depth);
+    [texColor, texId, texDepth, ...pipeTex].forEach((t) => t && gl.deleteTexture(t));
+    pipeFbo.forEach((fb) => fb && gl.deleteFramebuffer(fb));
     if (fbo) gl.deleteFramebuffer(fbo);
     texColor = floatOK ? tex(gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT, W, H) : tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, W, H);
     texId = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, W, H);
-    depth = gl.createRenderbuffer(); gl.bindRenderbuffer(gl.RENDERBUFFER, depth);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT24, W, H);
+    texDepth = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texDepth);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.DEPTH_COMPONENT24, W, H, 0, gl.DEPTH_COMPONENT, gl.UNSIGNED_INT, null);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     fbo = gl.createFramebuffer(); gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texColor, 0);
     gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT1, gl.TEXTURE_2D, texId, 0);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, depth);
+    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.TEXTURE_2D, texDepth, 0);
     gl.drawBuffers([gl.COLOR_ATTACHMENT0, gl.COLOR_ATTACHMENT1]);
-    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) $('error').textContent = 'FBO incompleto.';
+    if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) $('error').textContent = 'FBO escena incompleto.';
+    const fmt = floatOK ? [gl.RGBA16F, gl.RGBA, gl.HALF_FLOAT] : [gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE];
+    for (let i = 0; i < 2; i++) {
+      pipeTex[i] = tex(fmt[0], fmt[1], fmt[2], W, H);
+      pipeFbo[i] = gl.createFramebuffer();
+      gl.bindFramebuffer(gl.FRAMEBUFFER, pipeFbo[i]);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, pipeTex[i], 0);
+      gl.drawBuffers([gl.COLOR_ATTACHMENT0]);
+      if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) $('error').textContent = 'FBO pipe incompleto.';
+    }
     gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    texAuditSrc = texColor;
     state.dirty = true;
+  }
+
+  // Una sola posicion de luz por frame (compartida por escena.frag y marcaluz).
+  function currentLightPos() {
+    return A.lightPosFromAzEl(state.az, state.el, state.lightDist, state.target);
+  }
+
+  function lightMarkerClip(vp, pos) {
+    const c = m4.transformPoint(vp, pos);
+    return { x: c[0] / c[3], y: c[1] / c[3], z: c[2] / c[3], w: c[3] };
+  }
+
+  function lightMarkerVisible(clip) {
+    if (clip.w <= 0) return false;
+    return clip.z > -0.98 && clip.z < 0.98 && Math.abs(clip.x) <= 1.05 && Math.abs(clip.y) <= 1.05;
+  }
+
+  // Fallback 2D en el borde cuando la fuente sale del frustum o queda detras de la camara.
+  function lightHudNdc(vp, pos) {
+    const clip = lightMarkerClip(vp, pos);
+    let x = clip.x; let y = clip.y;
+    let edge = 0;
+    if (clip.w <= 0) { x = -x; y = -y; edge = 1; }
+    if (!lightMarkerVisible(clip)) edge = 1;
+    const maxR = 0.9;
+    const len = Math.hypot(x, y);
+    if (len > maxR) { x = (x / len) * maxR; y = (y / len) * maxR; edge = 1; }
+    return { x, y, edge, angle: Math.atan2(y, x) };
+  }
+
+  function drawLightMarker3D(vp, eye, pos, w, h) {
+    const ml = P.marcaluz;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(ml.p);
+    gl.uniform3fv(ml.loc.uCenter, pos);
+    gl.uniform3fv(ml.loc.uEye, eye);
+    gl.uniform1f(ml.loc.uRadius, 0.14);
+    gl.uniformMatrix4fv(ml.loc.uViewProj, false, vp);
+    gl.uniform2f(ml.loc.uResolution, w, h);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, texDepth);
+    gl.uniform1i(ml.loc.uDepth, 0);
+    gl.bindVertexArray(markerVao);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disable(gl.BLEND);
+  }
+
+  function drawLightHud(w, h, hud) {
+    const ph = P.luzhud;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(ph.p);
+    gl.uniform2f(ph.loc.uResolution, w, h);
+    gl.uniform2f(ph.loc.uSunNdc, hud.x, hud.y);
+    gl.uniform1f(ph.loc.uRadiusNdc, hud.edge ? 0.045 : 0.055);
+    gl.uniform1f(ph.loc.uEdge, hud.edge);
+    gl.uniform1f(ph.loc.uArrowRad, hud.angle);
+    gl.bindVertexArray(quad);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disable(gl.BLEND);
+  }
+
+  function buildStages() {
+    if (state.view !== 'sim') return [];
+    const opt = [];
+    if (state.enMyopia && state.myopiaD > 0.05) opt.push('myopia');
+    if (state.enAstigma && state.cylinderD > 0.05) opt.push('astigma');
+    const col = state.enDalton ? ['dalton'] : [];
+    if (state.order === 'color-optica') return [...col, ...opt];
+    return [...opt, ...col];
+  }
+
+  function pipeCommon(prog, w, h) {
+    gl.uniform2f(prog.loc.uTexelSize, 1 / w, 1 / h);
+    gl.uniform1f(prog.loc.uNear, NEAR);
+    gl.uniform1f(prog.loc.uFar, FAR);
+    gl.uniform1f(prog.loc.uFovy, FOVY);
+    gl.uniform2f(prog.loc.uResolution, w, h);
+    gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texDepth);
+    gl.uniform1i(prog.loc.uDepth, 1);
+  }
+
+  function fsPass(prog, srcTex, dstFbo, w, h, extra) {
+    gl.bindFramebuffer(gl.FRAMEBUFFER, dstFbo);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.useProgram(prog.p);
+    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, srcTex);
+    if (prog.loc.uTexture) gl.uniform1i(prog.loc.uTexture, 0);
+    if (prog.loc.uSource) gl.uniform1i(prog.loc.uSource, 0);
+    if (extra) extra();
+    gl.bindVertexArray(quad);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  }
+
+  function runPipeToScreen(stages, w, h) {
+    let src = texColor, ping = 0;
+    texAuditSrc = texColor;
+    const hasOpt = stages.some((s) => s === 'myopia' || s === 'astigma');
+    const daltonIdx = stages.indexOf('dalton');
+    const optAfterDalton = daltonIdx >= 0 && stages.slice(daltonIdx + 1).some((s) => s === 'myopia' || s === 'astigma');
+    const optBeforeDalton = daltonIdx > 0;
+
+    for (let i = 0; i < stages.length; i++) {
+      const st = stages[i];
+      const toScreen = i === stages.length - 1;
+      const optLast = toScreen && (st === 'myopia' || st === 'astigma');
+      const dstFb = optLast ? pipeFbo[ping] : (toScreen ? null : pipeFbo[ping]);
+
+      if (st === 'dalton' && (optBeforeDalton || !hasOpt)) texAuditSrc = hasOpt ? src : texColor;
+
+      if (st === 'myopia') {
+        fsPass(P.miopia, src, dstFb, w, h, () => {
+          pipeCommon(P.miopia, w, h);
+          gl.uniform1f(P.miopia.loc.uMyopiaD, state.myopiaD);
+          gl.uniform1f(P.miopia.loc.uPupilMm, state.pupilMm);
+        });
+        if (optLast) {
+          texAuditSrc = pipeTex[ping];
+          fsPass(P.mostrar, pipeTex[ping], null, w, h, null);
+          src = pipeTex[ping];
+          continue;
+        }
+      } else if (st === 'astigma') {
+        fsPass(P.astigma, src, dstFb, w, h, () => {
+          pipeCommon(P.astigma, w, h);
+          gl.uniform1f(P.astigma.loc.uCylinderD, state.cylinderD);
+          gl.uniform1f(P.astigma.loc.uAxisDeg, state.axisDeg);
+          gl.uniform1f(P.astigma.loc.uPupilMm, state.pupilMm);
+        });
+        if (optLast) {
+          texAuditSrc = pipeTex[ping];
+          fsPass(P.mostrar, pipeTex[ping], null, w, h, null);
+          src = pipeTex[ping];
+          continue;
+        }
+      } else if (st === 'dalton') {
+        const pd = P.dalton;
+        const active = state.enDalton && (state.type !== 0 || state.sev > 0);
+        fsPass(pd, src, dstFb, w, h, () => {
+          const t = state.type;
+          const sp = M.simParams(t, state.sev);
+          gl.uniformMatrix3fv(pd.loc.uSim, false, M.toColumnMajor(sp.m1));
+          gl.uniformMatrix3fv(pd.loc.uSim2, false, M.toColumnMajor(sp.m2));
+          gl.uniform3fv(pd.loc.uPlane, sp.n);
+          gl.uniform1f(pd.loc.uInputLinear, 1.0);
+          gl.uniform1f(pd.loc.uOutputLinear, toScreen ? 0.0 : 1.0);
+          gl.uniform1f(pd.loc.uEnabled, active ? 1.0 : 0.0);
+        });
+        if (!optAfterDalton && hasOpt && toScreen) texAuditSrc = src;
+      }
+      if (!toScreen) { src = pipeTex[ping]; ping ^= 1; }
+    }
+    if (hasOpt && !stages.includes('dalton')) texAuditSrc = src;
+    return src;
+  }
+
+  function blitToScreen(w, h) {
+    fsPass(P.mostrar, texColor, null, w, h, null);
   }
 
   // Textura 256x1 con el estado de cada objeto para el mapa de calor.
@@ -136,17 +332,39 @@
     const r = state.radius, cy = Math.cos(state.pitch);
     return [state.target[0] + r * cy * Math.sin(state.yaw), state.target[1] + r * Math.sin(state.pitch), state.target[2] + r * cy * Math.cos(state.yaw)];
   }
-  function lightNow() {
-    return { dir: A.lightDir(state.az, state.el), color: S.LIGHTS[state.light].color, ambient: state.ambient, intensity: state.intensity };
+  function lightParams(uLightPos) {
+    return {
+      pos: uLightPos,
+      color: S.LIGHTS[state.light].color,
+      ambient: state.ambient,
+      intensity: state.intensity
+    };
+  }
+
+  function conditionLabel() {
+    if (state.view === 'orig') return 'original';
+    const parts = [];
+    if (state.enDalton && state.type !== 0) parts.push(A.TYPES[state.type]);
+    else if (state.enDalton) parts.push('daltonismo neutro');
+    if (state.enMyopia) parts.push(`miopía ${state.myopiaD} D`);
+    if (state.enAstigma) parts.push(`astigmatismo ${state.cylinderD} D`);
+    return parts.length ? parts.join(' + ') : 'sin condiciones';
+  }
+
+  function metricsIndex() {
+    return (state.view === 'sim' && state.enDalton) ? state.type : 0;
   }
 
   // ---------------- render ----------------
-  let P = {}, meshes = {}, quad;
+  let P = {}, meshes = {}, quad, markerVao;
   const IDENTITY4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   function render() {
     resize();
-    const e = eye(), light = lightNow();
-    const vp = m4.mul(m4.persp(50 * Math.PI / 180, W / H, 0.1, 100), m4.lookAt(e, state.target, [0, 1, 0]));
+    const e = eye();
+    const uLightPos = currentLightPos();
+    window.__lastLightPos = uLightPos;
+    const light = lightParams(uLightPos);
+    const vp = m4.mul(m4.persp(FOVY, W / H, NEAR, FAR), m4.lookAt(e, state.target, [0, 1, 0]));
 
     // Pasada 1: escena -> FBO (color lineal + ID)
     gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
@@ -157,7 +375,8 @@
     gl.enable(gl.DEPTH_TEST); gl.disable(gl.BLEND);
     const ps = P.scene; gl.useProgram(ps.p);
     gl.uniformMatrix4fv(ps.loc.uViewProj, false, vp);
-    gl.uniform3fv(ps.loc.uLightDir, light.dir);
+    gl.uniform3fv(ps.loc.uLightPos, uLightPos);
+    gl.uniform1f(ps.loc.uAttenK, A.LIGHT_ATTEN_K);
     gl.uniform3fv(ps.loc.uLightColor, light.color);
     gl.uniform1f(ps.loc.uAmbient, light.ambient);
     gl.uniform1f(ps.loc.uIntensity, light.intensity);
@@ -173,35 +392,31 @@
       gl.drawArrays(gl.TRIANGLES, 0, mesh.count);
     });
 
-    // Auditoria con los buffers recien dibujados (si algo cambio).
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, W, H);
+    const stages = buildStages();
+    if (state.view === 'sim' && stages.length) runPipeToScreen(stages, W, H);
+    else { texAuditSrc = texColor; blitToScreen(W, H); }
+
     const now = performance.now();
     if (state.dirty && now - state.lastAudit > 200) { runAudit(); state.lastAudit = now; state.dirty = false; }
 
-    // Pasada 2: simulacion (Proyecto 1) -> pantalla
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, W, H);
-    gl.disable(gl.DEPTH_TEST);
-    const pd = P.dalton; gl.useProgram(pd.p);
-    const t = state.view === 'sim' ? state.type : 0;
-    const sp = M.simParams(t, state.sev);
-    gl.uniformMatrix3fv(pd.loc.uSim, false, M.toColumnMajor(sp.m1));
-    gl.uniformMatrix3fv(pd.loc.uSim2, false, M.toColumnMajor(sp.m2));
-    gl.uniform3fv(pd.loc.uPlane, sp.n);
-    gl.uniform1f(pd.loc.uInputLinear, 1.0);
-    gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texColor);
-    gl.uniform1i(pd.loc.uTexture, 0);
-    gl.bindVertexArray(quad);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-
-    // Pasada 3: mapa de calor + seleccion
+    // Pasada mapa de calor + seleccion (IDs nítidos, sin desenfoque)
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const ph = P.heat; gl.useProgram(ph.p);
+    gl.bindVertexArray(quad);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texId); gl.uniform1i(ph.loc.uIds, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texStatus); gl.uniform1i(ph.loc.uStatus, 1);
     gl.uniform1f(ph.loc.uSelected, state.selected);
     gl.uniform1f(ph.loc.uMode, state.heat);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.BLEND);
+
+    if (state.showLight) {
+      const clip = lightMarkerClip(vp, uLightPos);
+      if (lightMarkerVisible(clip)) drawLightMarker3D(vp, e, uLightPos, W, H);
+      else drawLightHud(W, H, lightHudNdc(vp, uLightPos));
+    }
     gl.bindVertexArray(null);
   }
 
@@ -217,10 +432,15 @@
     gl.readBuffer(gl.COLOR_ATTACHMENT1);
     const ids = new Uint8Array(W * H * 4);
     gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, ids);
-    gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    const auditFb = gl.createFramebuffer();
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, auditFb);
+    gl.framebufferTexture2D(gl.READ_FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, texAuditSrc, 0);
     let col;
     if (floatOK) { col = new Float32Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, col); }
     else { const b = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b); col = Float32Array.from(b, (x) => x / 255); }
+    gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
+    gl.readBuffer(gl.COLOR_ATTACHMENT1);
+    gl.deleteFramebuffer(auditFb);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
 
     const acc = {}; // id -> {n, c[3], rn, r[3], nb{}}
@@ -300,14 +520,14 @@
     // Lista de objetos ordenada por gravedad para el tipo actual.
     const rank = [0, 1, 3, 2]; // falla > confusión > aviso > bien
     const rows = Object.keys(audit).filter(isFig).map((id) => ({ id: Number(id), a: audit[id] }))
-      .sort((p, q) => rank[stOf(q.id)] - rank[stOf(p.id)] || p.a.metrics[state.type].dE - q.a.metrics[state.type].dE);
+      .sort((p, q) => rank[stOf(q.id)] - rank[stOf(p.id)] || p.a.metrics[metricsIndex()].dE - q.a.metrics[metricsIndex()].dE);
     $('list').innerHTML = rows.map(({ id, a }) => {
-      const m = a.metrics[state.type], st = stOf(id);
+      const m = a.metrics[metricsIndex()], st = stOf(id);
       return `<li><button data-id="${id}" class="st${st}${id === state.selected ? ' sel' : ''}">${ICON[st]} ${S.byId(id).name}<span>ΔE ${m.dE.toFixed(3)} · ${m.wcag.toFixed(2)}:1</span></button></li>`;
     }).join('');
     const nFail = rows.filter((r) => stOf(r.id) === 2).length;
     const nPairs = Object.values(confusions).reduce((n, l) => n + l.length, 0) / 2;
-    $('summary').textContent = `${A.TYPES[state.type]}: ${nFail} de ${rows.length} objetos no se distinguen de su fondo · ${nPairs} pares se confunden entre sí`;
+    $('summary').textContent = `${conditionLabel()}: ${nFail} de ${rows.length} objetos no se distinguen de su fondo · ${nPairs} pares se confunden entre sí`;
 
     const box = $('detail');
     const a = audit[state.selected], o = S.byId(state.selected);
@@ -318,11 +538,12 @@
     let html = `<h3>${o.name}</h3><p class="muted">Fondo adyacente principal: ${bgName}</p>`;
     html += `<div class="sw"><span style="background:${A.linToHex(A.clamp01(a.obj))}"></span>objeto <span style="background:${A.linToHex(A.clamp01(a.bg))}"></span>fondo (render)</div>`;
     html += '<table><tr><th>Visión</th><th>ΔE OKLab</th><th>WCAG</th><th>Estado</th></tr>';
-    a.metrics.forEach((m, t) => { html += `<tr${t === state.type ? ' class="cur"' : ''}><td>${m.type}</td><td>${m.dE.toFixed(3)}</td><td>${m.wcag.toFixed(2)}:1</td><td>${ICON[a.status[t]]} ${LABEL[a.status[t]]}</td></tr>`; });
+    const mi = metricsIndex();
+    a.metrics.forEach((m, t) => { html += `<tr${t === mi ? ' class="cur"' : ''}><td>${m.type}</td><td>${m.dE.toFixed(3)}</td><td>${m.wcag.toFixed(2)}:1</td><td>${ICON[a.status[t]]} ${LABEL[a.status[t]]}</td></tr>`; });
     html += '</table>';
     const conf = confusions[o.id] || [];
     if (conf.length) {
-      html += `<p class="conf">≈ En ${A.TYPES[state.type]} se confunde con: ` + conf.map((c) => `<button class="link" data-id="${c.other}">${S.byId(c.other).name}</button> (ΔE ${c.dE.toFixed(3)}; normal ${c.dEn.toFixed(3)})`).join(', ') + '. Si la forma es distinta, la forma los separa.</p>';
+      html += `<p class="conf">≈ Con ${conditionLabel()} se confunde con: ` + conf.map((c) => `<button class="link" data-id="${c.other}">${S.byId(c.other).name}</button> (ΔE ${c.dE.toFixed(3)}; normal ${c.dEn.toFixed(3)})`).join(', ') + '. Si la forma es distinta, la forma los separa.</p>';
     }
     const worst = Math.max(a.status[1], a.status[2], a.status[3]);
     if (worst > 0) {
@@ -339,15 +560,36 @@
   }
 
   // ---------------- controles ----------------
+  function auditFootnote() {
+    const opt = state.enMyopia || state.enAstigma;
+    const lab = $('auditNote');
+    if (!lab) return;
+    lab.textContent = opt
+      ? '· métricas sobre imagen tras óptica (desenfoque incluido); daltonismo se evalúa en CPU sobre ese color'
+      : '';
+  }
+
   function bind() {
     const set = (id, key, parse, out) => {
       const el = $(id);
       const f = () => { state[key] = parse(el.value); if (out) $(out).textContent = el.value; state.dirty = true; if (key === 'type') { uploadStatus(); updateHUD(); } };
-      el.addEventListener('input', f); f();
+      el.addEventListener('input', f);
+      el.addEventListener('change', f);
+      f();
     };
     set('type', 'type', Number); set('sev', 'sev', Number, 'sevV');
     set('az', 'az', Number, 'azV'); set('el', 'el', Number, 'elV');
+    set('lightDist', 'lightDist', Number, 'lightDistV');
     set('light', 'light', String); set('view', 'view', String);
+    set('order', 'order', String);
+    set('myopiaD', 'myopiaD', Number, 'myopiaDV'); set('pupilMm', 'pupilMm', Number, 'pupilMmV');
+    set('cylinderD', 'cylinderD', Number, 'cylinderDV'); set('axisDeg', 'axisDeg', Number, 'axisDegV');
+    [['enDalton', 'enDalton'], ['enMyopia', 'enMyopia'], ['enAstigma', 'enAstigma'], ['showLight', 'showLight']].forEach(([id, key]) => {
+      const el = $(id);
+      const f = () => { state[key] = el.checked; state.dirty = true; auditFootnote(); if (key === 'enDalton' || key === 'enMyopia' || key === 'enAstigma') { uploadStatus(); updateHUD(); } };
+      el.addEventListener('change', f); f();
+    });
+    auditFootnote();
     $('heat').addEventListener('input', (e) => { state.heat = Number(e.target.value); });
     // Clic en el recuadro del objeto ya seleccionado = deseleccionar.
     $('list').addEventListener('click', (e) => {
@@ -389,8 +631,14 @@
   }
   (async function init() {
     try {
-      const [sv, sf, dv, df, hf] = await Promise.all(['shaders/escena.vert', 'shaders/escena.frag', 'shaders/daltonizador.vert', 'shaders/daltonizador.frag', 'shaders/heatmap.frag'].map(src));
-      P.scene = program(sv, sf); P.dalton = program(dv, df); P.heat = program(dv, hf);
+      const qv = await src('shaders/daltonizador.vert');
+      const paths = ['shaders/escena.vert', 'shaders/escena.frag', 'shaders/daltonismo.frag', 'shaders/miopia.frag',
+        'shaders/astigmatismo.frag', 'shaders/heatmap.frag', 'shaders/mostrar.frag',
+        'shaders/luzhud.frag', 'shaders/marcaluz.vert', 'shaders/marcaluz.frag'];
+      const [sv, sf, dalf, mf, af, hf, showf, lhf, mlv, mlf] = await Promise.all(paths.map(src));
+      P.scene = program(sv, sf); P.dalton = program(qv, dalf); P.miopia = program(qv, mf);
+      P.astigma = program(qv, af); P.heat = program(qv, hf); P.mostrar = program(qv, showf);
+      P.luzhud = program(qv, lhf); P.marcaluz = program(mlv, mlf);
       // Modelos OBJ locales: un VAO por objeto auditable (nombre "o" = campo part).
       const files = [...new Set(S.OBJECTS.map((o) => o.model))];
       const parsed = {};
@@ -400,6 +648,14 @@
         if (part) meshes[o.id] = meshVAO(part); else console.warn('Falta la parte', o.part, 'en', o.model);
       });
       quad = quadVAO();
+      markerVao = (() => {
+        const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
+        const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+        gl.bindVertexArray(null);
+        return vao;
+      })();
       resize(); uploadStatus(); bind();
       requestAnimationFrame(loop);
     } catch (err) {

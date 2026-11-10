@@ -18,22 +18,35 @@
     <h1>Auditor 3D <small>v1</small></h1>
     <fieldset>
       <legend>Visión</legend>
-      <label>Vista <select id="view"><option value="sim">Simulada</option><option value="orig">Original</option></select></label>
+      <label>Vista <select id="view"><option value="sim">Simulada (cadena activa)</option><option value="orig">Original (cadena apagada)</option></select></label>
+    </fieldset>
+    <fieldset>
+      <legend>Condiciones</legend>
+      <label><input type="checkbox" id="enDalton" checked> Daltonismo</label>
       <label>Tipo <select id="type"><option value="1">Protan</option><option value="2" selected>Deutan</option><option value="3">Tritan</option><option value="0">Normal</option></select></label>
       <label>Severidad <input id="sev" type="range" min="0" max="1" step="0.1" value="1"> <output id="sevV">1</output></label>
+      <label><input type="checkbox" id="enMyopia"> Miopía</label>
+      <label>|D| dioptrías <input id="myopiaD" type="range" min="0.5" max="6" step="0.5" value="3"> <output id="myopiaDV">3</output></label>
+      <label>Pupila (mm) <input id="pupilMm" type="range" min="3" max="6" step="0.5" value="4"> <output id="pupilMmV">4</output></label>
+      <label><input type="checkbox" id="enAstigma"> Astigmatismo</label>
+      <label>Cilindro (D) <input id="cylinderD" type="range" min="0.5" max="4" step="0.5" value="1.5"> <output id="cylinderDV">1.5</output></label>
+      <label>Eje (°) <input id="axisDeg" type="range" min="0" max="180" step="5" value="90"> <output id="axisDegV">90</output></label>
+      <label>Orden <select id="order"><option value="optica-color">Óptica → color (defecto)</option><option value="color-optica">Color → óptica</option></select></label>
     </fieldset>
     <fieldset>
       <legend>Luz</legend>
       <label>Azimut <input id="az" type="range" min="-180" max="180" step="5" value="60"> <output id="azV">60</output>°</label>
       <label>Elevación <input id="el" type="range" min="5" max="85" step="5" value="35"> <output id="elV">35</output>°</label>
+      <label>Distancia (m) <input id="lightDist" type="range" min="2" max="12" step="0.5" value="4"> <output id="lightDistV">4</output></label>
       <label>Color <select id="light"><option value="blanca">Blanca D65</option><option value="sodio">Sodio (noche)</option><option value="ledFria">LED fría</option></select></label>
+      <label><input type="checkbox" id="showLight" checked> Marca del origen de la luz</label>
     </fieldset>
     <label>Marcas <select id="heat"><option value="1" selected>Contorno</option><option value="2">Patrón</option><option value="0">Apagadas</option></select></label>
     <p class="muted">Rayas = no se distingue del fondo · doble línea = se confunde con otro objeto · puntos = WCAG &lt; 3:1</p>
     <p id="summary" class="summary"></p>
     <ul id="list" class="list"></ul>
     <div id="detail" class="detail"><p>Haz clic en un objeto de la escena.</p></div>
-    <p class="muted">Auditoría: <span id="auditMs">—</span> · umbral ΔE OKLab 0.08 (provisional) · WCAG 1.4.11 3:1</p>
+    <p class="muted">Auditoría: <span id="auditMs">—</span> · umbral ΔE OKLab 0.08 (provisional) · WCAG 1.4.11 3:1 <span id="auditNote"></span></p>
   </aside>
 </main>
 <script src="js/machado.js"></script>
