@@ -9,9 +9,9 @@
  * iluminar un material ya simulado. Falla solo por el clamp y por el semiplano
  * de Brettel (tritan). Con luz de color L, S*(kd o L) != (S*kd) o L.
  */
-const A = require('../audit-core.js');
-const M = require('../machado.js');
-const { OBJECTS, LIGHTS, byId } = require('../scene.js');
+const A = require('../js/audit-core.js');
+const M = require('../js/machado.js');
+const { OBJECTS, LIGHTS, byId } = require('../js/scene.js');
 
 const SEV = Number(process.argv[2] || 1.0);
 const line = (s) => console.log(s);

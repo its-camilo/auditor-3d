@@ -1,6 +1,6 @@
 /* tools/color.js — utilidades de color compartidas por las herramientas node.
  * Espacio de trabajo: sRGB lineal (D65). Lab CIE 1976 con blanco D65. */
-const M = require('../machado.js');
+const M = require('../js/machado.js');
 const lin = (c) => (c <= 0.04045 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4));
 const enc = (c) => { c = Math.min(1, Math.max(0, c)); return c <= 0.0031308 ? c * 12.92 : 1.055 * Math.pow(c, 1 / 2.4) - 0.055; };
 const hexToLin = (h) => [1, 3, 5].map((i) => lin(parseInt(h.slice(i, i + 2), 16) / 255));
