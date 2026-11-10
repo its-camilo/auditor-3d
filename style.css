@@ -1,0 +1,35 @@
+/* style.css: texto grande y alto contraste, como el HUD del Proyecto 1.
+   Ninguna informacion se transmite solo con color: iconos y texto en cada estado. */
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; background: #0b0b0d; color: #f4f4f4; font: 16px/1.4 system-ui, sans-serif; }
+main { display: grid; grid-template-columns: 1fr 380px; height: 100vh; }
+.stage { position: relative; }
+canvas { width: 100%; height: 100%; display: block; cursor: crosshair; touch-action: none; }
+#error { position: absolute; top: 8px; left: 8px; color: #fff; background: #000; padding: 4px 8px; margin: 0; }
+#error:empty { display: none; }
+.hint, .fps { position: absolute; left: 8px; margin: 0; background: rgba(0,0,0,.7); padding: 4px 8px; font-size: 14px; }
+.hint { bottom: 8px; } .fps { top: 8px; right: 8px; left: auto; }
+.hud { overflow-y: auto; padding: 14px; border-left: 2px solid #444; background: #141418; }
+h1 { font-size: 22px; margin: 0 0 10px; } h1 small { font-size: 14px; color: #bbb; }
+h3 { margin: 6px 0; font-size: 18px; }
+fieldset { border: 1px solid #555; margin: 0 0 10px; padding: 8px; }
+legend { padding: 0 4px; font-weight: 700; }
+label { display: flex; gap: 8px; align-items: center; margin: 4px 0; }
+select, button { font: inherit; background: #222; color: #fff; border: 1px solid #888; padding: 2px 6px; }
+input[type=range] { flex: 1; }
+.summary { font-weight: 700; }
+.list { list-style: none; padding: 0; margin: 0 0 10px; }
+.list button { width: 100%; text-align: left; display: flex; justify-content: space-between; gap: 8px; margin: 2px 0; padding: 6px; }
+.list button span { color: #ccc; font-size: 13px; }
+.list button.st2 { border-left: 6px solid #fff; font-weight: 700; }
+.list button.st1 { border-left: 6px dotted #fff; }
+.list button.sel { outline: 3px solid #ffeb3b; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th, td { border-bottom: 1px solid #444; padding: 4px; text-align: left; }
+tr.cur td { background: #2a2a35; font-weight: 700; }
+.sw { display: flex; gap: 6px; align-items: center; margin: 6px 0; }
+.sw span, .chip { display: inline-block; width: 22px; height: 22px; border: 2px solid #fff; vertical-align: middle; }
+.sug { background: #1d1d26; padding: 8px; border: 1px solid #555; }
+.muted { color: #bbb; font-size: 13px; }
+code { font-size: 15px; }
+@media (max-width: 900px) { main { grid-template-columns: 1fr; grid-template-rows: 60vh auto; } }

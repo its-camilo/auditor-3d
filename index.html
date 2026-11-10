@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Auditor 3D de accesibilidad cromática · v0</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <section class="stage">
+    <canvas id="gl" aria-label="Escena 3D: andén de TransMilenio"></canvas>
+    <p id="error" role="alert"></p>
+    <p class="hint">Arrastra para orbitar · rueda para acercar · clic para auditar un objeto · F original/simulada · H mapa de calor</p>
+    <p id="fps" class="fps"></p>
+  </section>
+  <aside class="hud">
+    <h1>Auditor 3D <small>v0</small></h1>
+    <fieldset>
+      <legend>Visión</legend>
+      <label>Vista <select id="view"><option value="sim">Simulada</option><option value="orig">Original</option></select></label>
+      <label>Tipo <select id="type"><option value="1">Protan</option><option value="2" selected>Deutan</option><option value="3">Tritan</option><option value="0">Normal</option></select></label>
+      <label>Severidad <input id="sev" type="range" min="0" max="1" step="0.1" value="1"> <output id="sevV">1</output></label>
+    </fieldset>
+    <fieldset>
+      <legend>Luz</legend>
+      <label>Azimut <input id="az" type="range" min="-180" max="180" step="5" value="60"> <output id="azV">60</output>°</label>
+      <label>Elevación <input id="el" type="range" min="5" max="85" step="5" value="35"> <output id="elV">35</output>°</label>
+      <label>Color <select id="light"><option value="blanca">Blanca D65</option><option value="sodio">Sodio (noche)</option><option value="ledFria">LED fría</option></select></label>
+    </fieldset>
+    <label class="row"><input id="heat" type="checkbox" checked> Mapa de calor (rayas = falla, puntos = WCAG &lt; 3:1)</label>
+    <p id="summary" class="summary"></p>
+    <ul id="list" class="list"></ul>
+    <div id="detail" class="detail"><p>Haz clic en un objeto de la escena.</p></div>
+    <p class="muted">Auditoría: <span id="auditMs">—</span> · umbral ΔE OKLab 0.08 (provisional) · WCAG 1.4.11 3:1</p>
+  </aside>
+</main>
+<script src="machado.js"></script>
+<script src="audit-core.js"></script>
+<script src="scene.js"></script>
+<script src="main.js"></script>
+</body>
+</html>

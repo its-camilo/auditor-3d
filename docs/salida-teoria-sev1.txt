@@ -1,0 +1,35 @@
+   Par                                              tipo     dE min   theta* (az,el)   WCAG en theta*   dE-rango       Yobj/Yfondo
+   Franja podotactil / Piso del anden               protan  0.155   (-90, 5)        1.62:1          0.155-0.237   2.02-2.07  [misma normal]
+   Franja podotactil / Piso del anden               deutan  0.175   (-90, 5)        1.80:1          0.175-0.267   2.33-2.39  [misma normal]
+   Franja podotactil / Piso del anden               tritan  0.144   (-90, 5)        1.72:1          0.144-0.219   2.19-2.24  [misma normal]
+   Senal troncal roja / Pared de la estacion        protan  0.265   (-90,85)        2.79:1          0.265-0.419   0.11-0.31  [misma normal]
+   Senal troncal roja / Pared de la estacion        deutan  0.193   (-90,85)        2.14:1          0.193-0.309   0.26-0.45  [misma normal]
+   Senal troncal roja / Pared de la estacion        tritan  0.233   (-90,85)        2.36:1          0.233-0.371   0.20-0.39  [misma normal]
+   Senal troncal verde / Pared de la estacion       protan  0.125   (-90,85)        1.60:1          0.125-0.203   0.47-0.66  [misma normal]
+   Senal troncal verde / Pared de la estacion       deutan  0.134   (-90,85)        1.70:1          0.134-0.217   0.42-0.61  [misma normal]
+   Senal troncal verde / Pared de la estacion       tritan  0.128   (-90,85)        1.67:1          0.128-0.207   0.44-0.62  [misma normal]
+   Panel de ayuda verde / Pared de la estacion      protan  0.188   (-90,85)        2.13:1          0.188-0.305   0.26-0.38  [misma normal]
+   Panel de ayuda verde / Pared de la estacion      deutan  0.195   (-90,85)        2.21:1          0.195-0.317   0.23-0.36  [misma normal]
+   Panel de ayuda verde / Pared de la estacion      tritan  0.191   (-90,85)        2.18:1          0.191-0.311   0.24-0.37  [misma normal]
+   Boton de emergencia rojo / Panel de ayuda verde  protan  0.050   (  0, 5)        1.20:1          0.050-0.126   0.46-0.80  [misma normal] FALLA
+   Boton de emergencia rojo / Panel de ayuda verde  deutan  0.031   (-90, 5)        1.05:1          0.031-0.051   1.02-1.23  [misma normal] FALLA
+   Boton de emergencia rojo / Panel de ayuda verde  tritan  0.143   (-90, 5)        1.06:1          0.143-0.233   0.79-1.06  [misma normal]
+   Bus troncal rojo / Pared de la estacion          protan  0.140   ( 90, 5)        1.69:1          0.140-0.655   0.02-0.44
+   Bus troncal rojo / Pared de la estacion          deutan  0.101   ( 90,30)        1.07:1          0.101-0.582   0.04-1.01
+   Bus troncal rojo / Pared de la estacion          tritan  0.191   ( 90,50)        1.46:1          0.191-0.601   0.03-0.78
+   Banca azul / Piso del anden                      protan  0.140   (  0, 5)        1.56:1          0.140-0.217   0.37-0.38  [misma normal]
+   Banca azul / Piso del anden                      deutan  0.165   (  0, 5)        1.69:1          0.165-0.255   0.29-0.29  [misma normal]
+   Banca azul / Piso del anden                      tritan  0.138   (  0, 5)        1.62:1          0.138-0.215   0.34-0.34  [misma normal]
+
+Lectura (Corolario 1): con la misma normal la razon Yobj/Yfondo casi no cambia con la luz
+(solo la mueve el especular); el angulo solo oscurece o aclara todo. Con normales distintas
+la razon barre un rango y puede cruzar 1.0: isoluminancia. Ahi el dicromata pierde el par.
+1) Conservacion del blanco: max |S*1 - 1| por tipo (severidad 0..1)
+   protan  1.00e-6
+   deutan  1.00e-6
+   tritan  1.00e-5
+
+2) Conmutacion sim(shade(c)) vs shade(sim(c)), 20000 muestras, severidad 1
+   Blanca D65               dE_OK medio 0.0000  maximo 0.0000
+   Sodio (noche, aprox.)    dE_OK medio 0.0414  maximo 0.1188
+   LED fria (aprox.)        dE_OK medio 0.0076  maximo 0.0210
