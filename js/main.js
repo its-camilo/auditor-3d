@@ -312,15 +312,28 @@
   // Textura 256x1 con el estado de cada objeto para el mapa de calor.
   let texStatus = null;
   const statusData = new Uint8Array(256 * 4);
+  let auditStale = true;
+  function scheduleAudit() {
+    state.dirty = true;
+    auditStale = true;
+    state.lastAudit = 0;
+  }
+
   // 0 bien, 1 aviso WCAG, 2 falla contra el fondo, 3 se confunde con otro objeto.
+  function figureStatus(id) {
+    if (!audit[id]) return 0;
+    const mi = metricsIndex();
+    let st = audit[id].status[mi];
+    if (state.view === 'sim' && state.enDalton && state.type !== 0 && st < 2 && confusions[id] && confusions[id].length) st = 3;
+    return st;
+  }
+
   function uploadStatus() {
     statusData.fill(0);
     computeConfusions();
     Object.keys(audit).forEach((id) => {
       if (!isFig(id)) return;
-      let st = audit[id].status[metricsIndex()];
-      if (st < 2 && confusions[id] && confusions[id].length) st = 3;
-      statusData[id * 4] = st;
+      statusData[id * 4] = figureStatus(id);
     });
     if (!texStatus) texStatus = tex(gl.RGBA8, gl.RGBA, gl.UNSIGNED_BYTE, 256, 1);
     gl.bindTexture(gl.TEXTURE_2D, texStatus);
@@ -408,7 +421,12 @@
     else { texAuditSrc = texColor; blitToScreen(W, H); }
 
     const now = performance.now();
-    if (state.dirty && now - state.lastAudit > 200) { runAudit(); state.lastAudit = now; state.dirty = false; }
+    if (auditStale || (state.dirty && now - state.lastAudit > 280)) {
+      runAudit();
+      auditStale = false;
+      state.lastAudit = now;
+      state.dirty = false;
+    }
 
     // Pasada mapa de calor + seleccion (IDs nítidos, sin desenfoque)
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
@@ -438,6 +456,10 @@
   function runAudit() {
     const t0 = performance.now();
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, fbo);
+  gl.readBuffer(gl.COLOR_ATTACHMENT0);
+    let colScene;
+    if (floatOK) { colScene = new Float32Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.FLOAT, colScene); }
+    else { const b0 = new Uint8Array(W * H * 4); gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, b0); colScene = Float32Array.from(b0, (x) => x / 255); }
     gl.readBuffer(gl.COLOR_ATTACHMENT1);
     const ids = new Uint8Array(W * H * 4);
     gl.readPixels(0, 0, W, H, gl.RGBA, gl.UNSIGNED_BYTE, ids);
@@ -452,8 +474,12 @@
     gl.deleteFramebuffer(auditFb);
     gl.bindFramebuffer(gl.READ_FRAMEBUFFER, null);
 
-    const acc = {}; // id -> {n, c[3], rn, r[3], nb{}}
-    const get = (id) => acc[id] || (acc[id] = { n: 0, c: [0, 0, 0], rn: 0, r: [0, 0, 0], nb: {} });
+    const acc = {}; // id -> {n, c, rn, r, ns, rs, nb}
+    const get = (id) => acc[id] || (acc[id] = {
+      n: 0, c: [0, 0, 0], rn: 0, r: [0, 0, 0],
+      ns: 0, cs: [0, 0, 0], rns: 0, rs: [0, 0, 0],
+      nb: {}
+    });
     const step = W * H > 900000 ? 2 : 1;
     const dirs = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]].map(([x, y]) => [x * RING, y * RING]);
     for (let y = 0; y < H; y += step) {
@@ -462,12 +488,14 @@
         if (!id) continue;
         const a = get(id);
         a.n++; a.c[0] += col[i * 4]; a.c[1] += col[i * 4 + 1]; a.c[2] += col[i * 4 + 2];
+        a.ns++; a.cs[0] += colScene[i * 4]; a.cs[1] += colScene[i * 4 + 1]; a.cs[2] += colScene[i * 4 + 2];
         for (const [dx, dy] of dirs) {
           const X = x + dx, Y = y + dy;
           if (X < 0 || Y < 0 || X >= W || Y >= H) continue;
           const j = Y * W + X, jd = ids[j * 4];
           if (!jd || jd === id) continue;
           a.rn++; a.r[0] += col[j * 4]; a.r[1] += col[j * 4 + 1]; a.r[2] += col[j * 4 + 2];
+          a.rns++; a.rs[0] += colScene[j * 4]; a.rs[1] += colScene[j * 4 + 1]; a.rs[2] += colScene[j * 4 + 2];
           a.nb[jd] = (a.nb[jd] || 0) + 1;
         }
       }
@@ -476,10 +504,14 @@
     Object.keys(acc).forEach((k) => {
       const a = acc[k]; if (!a.rn || a.n < 20) return;
       const obj = A.scl(a.c, 1 / a.n), bg = A.scl(a.r, 1 / a.rn);
+      const objScene = A.scl(a.cs, 1 / a.ns), bgScene = A.scl(a.rs, 1 / a.rns);
       const skipSim = daltonAlreadyInAuditBuffer() ? state.type : undefined;
       const metrics = A.pairMetrics(A.clamp01(obj), A.clamp01(bg), state.sev, skipSim);
       const mainBg = Object.keys(a.nb).sort((p, q) => a.nb[q] - a.nb[p])[0];
-      res[k] = { obj, bg, metrics, status: metrics.map(A.status), mainBg: Number(mainBg), px: a.n * step * step };
+      res[k] = {
+        obj, bg, objScene, bgScene, metrics,
+        status: metrics.map(A.status), mainBg: Number(mainBg), px: a.n * step * step
+      };
     });
     audit = res;
     window.__auditData = audit;
@@ -502,12 +534,13 @@
     const skipCpuSim = daltonAlreadyInAuditBuffer();
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
-        const a = A.clamp01(audit[ids[i]].obj), b = A.clamp01(audit[ids[j]].obj);
-        const dEn = A.dEok(a, b);
+        const an = A.clamp01(audit[ids[i]].objScene), bn = A.clamp01(audit[ids[j]].objScene);
+        const dEn = A.dEok(an, bn);
         if (dEn < TAU_PAIR_NORMAL) continue;
+        const av = A.clamp01(audit[ids[i]].obj), bv = A.clamp01(audit[ids[j]].obj);
         const dE = skipCpuSim
-          ? A.dEok(a, b)
-          : A.dEok(A.simulate(t, state.sev, a), A.simulate(t, state.sev, b));
+          ? A.dEok(av, bv)
+          : A.dEok(A.simulate(t, state.sev, av), A.simulate(t, state.sev, bv));
         if (dE >= A.TH.TAU_DE) continue;
         (confusions[ids[i]] = confusions[ids[i]] || []).push({ other: Number(ids[j]), dE, dEn });
         (confusions[ids[j]] = confusions[ids[j]] || []).push({ other: Number(ids[i]), dE, dEn });
@@ -531,7 +564,7 @@
   // ---------------- HUD ----------------
   const LABEL = ['Bien', 'Aviso: WCAG < 3:1', 'Falla: no distinguible', 'Se confunde con otro objeto'];
   const ICON = ['✔', '⚠', '✖', '≈'];
-  const stOf = (id) => statusData[id * 4];
+  const stOf = (id) => figureStatus(Number(id));
   function updateHUD() {
     // Lista de objetos ordenada por gravedad para el tipo actual.
     const rank = [0, 1, 3, 2]; // falla > confusión > aviso > bien
@@ -588,7 +621,11 @@
   function bind() {
     const set = (id, key, parse, out) => {
       const el = $(id);
-      const f = () => { state[key] = parse(el.value); if (out) $(out).textContent = el.value; state.dirty = true; if (key === 'type') { uploadStatus(); updateHUD(); } };
+      const f = () => {
+        state[key] = parse(el.value);
+        if (out) $(out).textContent = el.value;
+        scheduleAudit();
+      };
       el.addEventListener('input', f);
       el.addEventListener('change', f);
       f();
@@ -602,7 +639,7 @@
     set('cylinderD', 'cylinderD', Number, 'cylinderDV'); set('axisDeg', 'axisDeg', Number, 'axisDegV');
     [['enDalton', 'enDalton'], ['enMyopia', 'enMyopia'], ['enAstigma', 'enAstigma'], ['showLight', 'showLight']].forEach(([id, key]) => {
       const el = $(id);
-      const f = () => { state[key] = el.checked; state.dirty = true; auditFootnote(); if (key === 'enDalton' || key === 'enMyopia' || key === 'enAstigma') { uploadStatus(); updateHUD(); } };
+      const f = () => { state[key] = el.checked; auditFootnote(); scheduleAudit(); };
       el.addEventListener('change', f); f();
     });
     auditFootnote();
@@ -672,7 +709,13 @@
         gl.bindVertexArray(null);
         return vao;
       })();
-      resize(); uploadStatus(); bind();
+      window.__metricsIndex = () => metricsIndex();
+      window.__heatmapFailCount = () => {
+        let n = 0;
+        Object.keys(audit).filter(isFig).forEach((id) => { if (figureStatus(id) === 2) n++; });
+        return n;
+      };
+      resize(); bind();
       requestAnimationFrame(loop);
     } catch (err) {
       $('error').textContent = 'Error: ' + err.message + ' (abre con un servidor local, ver README).';

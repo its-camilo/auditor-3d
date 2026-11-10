@@ -10,7 +10,8 @@ async function waitScene(page) {
     const s = document.getElementById('summary');
     return s && /\d+ de \d+ objetos/.test(s.textContent) && !s.textContent.includes('0 de 0');
   }, { timeout: 20000 });
-  await page.waitForTimeout(1200);
+  await page.waitForFunction(() => window.__auditData && Object.keys(window.__auditData).length >= 10, { timeout: 15000 });
+  await page.waitForTimeout(800);
 }
 
 async function setCond(page, opts) {
@@ -25,17 +26,7 @@ async function setCond(page, opts) {
     };
     Object.keys(o).forEach((k) => set(k, o[k]));
   }, opts);
-  await page.waitForTimeout(500);
-}
-
-async function pickBoton(page) {
-  await page.evaluate((id) => {
-    window.__auditState && (window.__auditState.selected = id);
-  }, BOTON_ID).catch(() => {});
-  await page.evaluate((id) => {
-    const s = { selected: id, dirty: true };
-    if (typeof window.__forceAudit === 'function') window.__forceAudit(s);
-  }, BOTON_ID).catch(() => {});
+  await page.waitForTimeout(600);
 }
 
 const scenarios = [
@@ -69,19 +60,37 @@ for (const sc of scenarios) {
     const pairs = summary.match(/(\d+) pares/);
     const audit = window.__auditData || {};
     const rec = audit[botonId];
-    const type = Number(document.getElementById('type')?.value || 2);
-    const dE = rec?.metrics?.[type]?.dE;
-    return { summary, fail: m ? Number(m[1]) : null, total: m ? Number(m[2]) : null, pairs: pairs ? Number(pairs[1]) : null, botonDe: dE };
+    const mi = typeof window.__metricsIndex === 'function' ? window.__metricsIndex() : 0;
+    const dE = rec?.metrics?.[mi]?.dE;
+    const heatFails = typeof window.__heatmapFailCount === 'function' ? window.__heatmapFailCount() : null;
+    const fails = [];
+    if (typeof window.__metricsIndex === 'function') {
+      Object.keys(audit).forEach((k) => {
+        const st = audit[k].status?.[mi];
+        if (st === 2) fails.push(Number(k));
+      });
+    }
+    return {
+      summary, fail: m ? Number(m[1]) : null, total: m ? Number(m[2]) : null,
+      pairs: pairs ? Number(pairs[1]) : null, botonDe: dE, metricsIndex: mi,
+      heatmapFailOrConf: heatFails, failIds: fails
+    };
   }, BOTON_ID);
   await page.screenshot({ path: `${OUT}/hud-${sc.key}.png`, fullPage: false });
   rows.push({ ...sc, ...data });
-  console.log(sc.key, data.summary);
+  console.log(sc.key, data.summary, 'heatmapΔ', data.heatmapFailOrConf, 'botonDe', data.botonDe?.toFixed(4));
 }
 
 await writeFile(`${OUT}/hud-audit-snapshot.json`, JSON.stringify(rows, null, 2));
 await browser.close();
 if (logs.length) {
   console.error('console errors:', logs.join('\n'));
+  process.exit(1);
+}
+const badHeat = rows.find((r) => r.key === 'dalton-off-d65' && r.heatmapFailOrConf > 0);
+const badSync = rows.find((r) => r.fail !== r.heatmapFailOrConf);
+if (badHeat || badSync) {
+  console.error('FAIL heatmap/sync', badHeat?.key, badSync && `${badSync.key} summary=${badSync.fail} heat=${badSync.heatmapFailOrConf}`);
   process.exit(1);
 }
 console.log(JSON.stringify(rows, null, 2));
