@@ -318,7 +318,7 @@
     computeConfusions();
     Object.keys(audit).forEach((id) => {
       if (!isFig(id)) return;
-      let st = audit[id].status[state.type];
+      let st = audit[id].status[metricsIndex()];
       if (st < 2 && confusions[id] && confusions[id].length) st = 3;
       statusData[id * 4] = st;
     });
@@ -353,6 +353,15 @@
 
   function metricsIndex() {
     return (state.view === 'sim' && state.enDalton) ? state.type : 0;
+  }
+
+  // color→óptica con ambas etapas: texAuditSrc queda tras el desenfoque pero ya incluye daltonismo GPU.
+  function daltonAlreadyInAuditBuffer() {
+    if (state.view !== 'sim' || !state.enDalton || state.order !== 'color-optica') return false;
+    const stages = buildStages();
+    const hasDalton = stages.includes('dalton');
+    const hasOpt = stages.some((s) => s === 'myopia' || s === 'astigma');
+    return hasDalton && hasOpt;
   }
 
   // ---------------- render ----------------
@@ -467,11 +476,13 @@
     Object.keys(acc).forEach((k) => {
       const a = acc[k]; if (!a.rn || a.n < 20) return;
       const obj = A.scl(a.c, 1 / a.n), bg = A.scl(a.r, 1 / a.rn);
-      const metrics = A.pairMetrics(A.clamp01(obj), A.clamp01(bg), state.sev);
+      const skipSim = daltonAlreadyInAuditBuffer() ? state.type : undefined;
+      const metrics = A.pairMetrics(A.clamp01(obj), A.clamp01(bg), state.sev, skipSim);
       const mainBg = Object.keys(a.nb).sort((p, q) => a.nb[q] - a.nb[p])[0];
       res[k] = { obj, bg, metrics, status: metrics.map(A.status), mainBg: Number(mainBg), px: a.n * step * step };
     });
     audit = res;
+    window.__auditData = audit;
     uploadStatus();
     $('auditMs').textContent = (performance.now() - t0).toFixed(0) + ' ms';
     updateHUD();
@@ -484,14 +495,19 @@
   const TAU_PAIR_NORMAL = 0.10;
   function computeConfusions() {
     confusions = {};
+    // Confusiones entre objetos: solo con daltonismo activo (pares dicrómatas).
+    if (state.view !== 'sim' || !state.enDalton || state.type === 0) return;
     const ids = Object.keys(audit).filter(isFig);
     const t = state.type;
+    const skipCpuSim = daltonAlreadyInAuditBuffer();
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
         const a = A.clamp01(audit[ids[i]].obj), b = A.clamp01(audit[ids[j]].obj);
         const dEn = A.dEok(a, b);
-        if (dEn < TAU_PAIR_NORMAL || t === 0) continue;
-        const dE = A.dEok(A.simulate(t, state.sev, a), A.simulate(t, state.sev, b));
+        if (dEn < TAU_PAIR_NORMAL) continue;
+        const dE = skipCpuSim
+          ? A.dEok(a, b)
+          : A.dEok(A.simulate(t, state.sev, a), A.simulate(t, state.sev, b));
         if (dE >= A.TH.TAU_DE) continue;
         (confusions[ids[i]] = confusions[ids[i]] || []).push({ other: Number(ids[j]), dE, dEn });
         (confusions[ids[j]] = confusions[ids[j]] || []).push({ other: Number(ids[i]), dE, dEn });

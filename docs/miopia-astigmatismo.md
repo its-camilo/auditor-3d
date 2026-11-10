@@ -42,7 +42,7 @@ La iluminación de escena usa **Blinn–Phong con luz puntual** en `uLightPos` (
 ## Auditoría y picking
 
 - **Picking e IDs del heatmap:** siempre el buffer de la pasada de escena, **sin desenfoque**.
-- **ΔE / WCAG:** si hay etapas ópticas activas, los promedios de color se leen del buffer **después del desenfoque** y **antes** del daltonismo; el daltonismo sigue evaluándose en CPU sobre ese color (el desenfoque puede fusionar objeto y fondo y bajar contraste).
+- **ΔE / WCAG:** con orden **óptica→color**, el tap de auditoría queda tras el desenfoque y **antes** del daltonismo (simulación Machado en CPU). Con **color→óptica** y ambas etapas activas, el tap es **tras** toda la cadena (colores ya daltonizados en GPU; no se vuelve a aplicar Machado para el tipo activo). Las confusiones entre objetos del HUD solo se cuentan con daltonismo encendido.
 
 ## Límite clínico (pantalla vs examen)
 
