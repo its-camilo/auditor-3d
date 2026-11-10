@@ -47,7 +47,17 @@
       const y = [z[1] * x[2] - z[2] * x[1], z[2] * x[0] - z[0] * x[2], z[0] * x[1] - z[1] * x[0]];
       return new Float32Array([x[0], y[0], z[0], 0, x[1], y[1], z[1], 0, x[2], y[2], z[2], 0, -A.dot(x, e), -A.dot(y, e), -A.dot(z, e), 1]);
     },
-    ts(t, s) { return new Float32Array([s[0], 0, 0, 0, 0, s[1], 0, 0, 0, 0, s[2], 0, t[0], t[1], t[2], 1]); }
+    ts(t, s) { return new Float32Array([s[0], 0, 0, 0, 0, s[1], 0, 0, 0, 0, s[2], 0, t[0], t[1], t[2], 1]); },
+    transformPoint(m, p) {
+      const x = p[0], y = p[1], z = p[2];
+      const w = m[3] * x + m[7] * y + m[11] * z + m[15];
+      return [
+        m[0] * x + m[4] * y + m[8] * z + m[12],
+        m[1] * x + m[5] * y + m[9] * z + m[13],
+        m[2] * x + m[6] * y + m[10] * z + m[14],
+        w
+      ];
+    }
   };
 
   // ---------------- shaders ----------------
@@ -133,21 +143,57 @@
     state.dirty = true;
   }
 
-  // uLightDir apunta hacia la fuente (misma convencion que escena.frag, N·L > 0 iluminado).
-  function lightMarkerPos(light) {
-    const d = state.radius * 1.25;
-    return [
-      state.target[0] + light.dir[0] * d,
-      state.target[1] + light.dir[1] * d,
-      state.target[2] + light.dir[2] * d
-    ];
+  // Proyecta la direccion de luz al HUD en NDC; recorta al borde si sale del frustum.
+  function lightHudNdc(vp, light) {
+    const t = state.target;
+    let x = 0; let y = 0; let valid = false;
+    for (const d of [1.5, 3, 5, 8, 12, 18, 28]) {
+      const c = m4.transformPoint(vp, [
+        t[0] + light.dir[0] * d,
+        t[1] + light.dir[1] * d,
+        t[2] + light.dir[2] * d
+      ]);
+      if (Math.abs(c[3]) < 1e-5) continue;
+      const nx = c[0] / c[3], ny = c[1] / c[3], nz = c[2] / c[3];
+      if (c[3] > 0 && nz > -1 && nz < 1 && Math.abs(nx) <= 1.15 && Math.abs(ny) <= 1.15) {
+        x = nx; y = ny; valid = true; break;
+      }
+    }
+    if (!valid) {
+      const c0 = m4.transformPoint(vp, t);
+      const c1 = m4.transformPoint(vp, [t[0] + light.dir[0], t[1] + light.dir[1], t[2] + light.dir[2]]);
+      if (Math.abs(c1[3]) > 1e-5 && Math.abs(c0[3]) > 1e-5) {
+        x = c1[0] / c1[3] - c0[0] / c0[3];
+        y = c1[1] / c1[3] - c0[1] / c0[3];
+        const s = 4 / (Math.hypot(x, y) || 1);
+        x *= s; y *= s;
+      }
+    }
+    let edge = 0;
+    const maxR = 0.9;
+    if (!valid) edge = 1;
+    const len = Math.hypot(x, y);
+    if (len > maxR) { x = (x / len) * maxR; y = (y / len) * maxR; edge = 1; }
+  if (!valid && len < 1e-3) { x = light.dir[0] * 0.75; y = light.dir[1] * 0.75 + light.dir[2] * 0.2; edge = 1; }
+    return { x, y, edge, angle: Math.atan2(y, x) };
   }
 
-  function markerBehindCamera(eye, light) {
-    const vx = state.target[0] - eye[0], vy = state.target[1] - eye[1], vz = state.target[2] - eye[2];
-    const vl = Math.hypot(vx, vy, vz) || 1;
-    const dot = (vx * light.dir[0] + vy * light.dir[1] + vz * light.dir[2]) / vl;
-    return dot < 0.05;
+  function drawLightHud(w, h, hud) {
+    const ph = P.luzhud;
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.viewport(0, 0, w, h);
+    gl.disable(gl.DEPTH_TEST);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+    gl.useProgram(ph.p);
+    gl.uniform2f(ph.loc.uResolution, w, h);
+    gl.uniform2f(ph.loc.uSunNdc, hud.x, hud.y);
+    gl.uniform1f(ph.loc.uRadiusNdc, hud.edge ? 0.045 : 0.055);
+    gl.uniform1f(ph.loc.uEdge, hud.edge);
+    gl.uniform1f(ph.loc.uArrowRad, hud.angle);
+    gl.bindVertexArray(quad);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    gl.disable(gl.BLEND);
   }
 
   function buildStages() {
@@ -186,18 +232,31 @@
   function runPipeToScreen(stages, w, h) {
     let src = texColor, ping = 0;
     texAuditSrc = texColor;
-  const hasOpt = stages.some((s) => s === 'myopia' || s === 'astigma');
+    const hasOpt = stages.some((s) => s === 'myopia' || s === 'astigma');
+    const daltonIdx = stages.indexOf('dalton');
+    const optAfterDalton = daltonIdx >= 0 && stages.slice(daltonIdx + 1).some((s) => s === 'myopia' || s === 'astigma');
+    const optBeforeDalton = daltonIdx > 0;
+
     for (let i = 0; i < stages.length; i++) {
       const st = stages[i];
       const toScreen = i === stages.length - 1;
-      const dstFb = toScreen ? null : pipeFbo[ping];
-      if (st === 'dalton') texAuditSrc = hasOpt ? src : texColor;
+      const optLast = toScreen && (st === 'myopia' || st === 'astigma');
+      const dstFb = optLast ? pipeFbo[ping] : (toScreen ? null : pipeFbo[ping]);
+
+      if (st === 'dalton' && (optBeforeDalton || !hasOpt)) texAuditSrc = hasOpt ? src : texColor;
+
       if (st === 'myopia') {
         fsPass(P.miopia, src, dstFb, w, h, () => {
           pipeCommon(P.miopia, w, h);
           gl.uniform1f(P.miopia.loc.uMyopiaD, state.myopiaD);
           gl.uniform1f(P.miopia.loc.uPupilMm, state.pupilMm);
         });
+        if (optLast) {
+          texAuditSrc = pipeTex[ping];
+          fsPass(P.mostrar, pipeTex[ping], null, w, h, null);
+          src = pipeTex[ping];
+          continue;
+        }
       } else if (st === 'astigma') {
         fsPass(P.astigma, src, dstFb, w, h, () => {
           pipeCommon(P.astigma, w, h);
@@ -205,6 +264,12 @@
           gl.uniform1f(P.astigma.loc.uAxisDeg, state.axisDeg);
           gl.uniform1f(P.astigma.loc.uPupilMm, state.pupilMm);
         });
+        if (optLast) {
+          texAuditSrc = pipeTex[ping];
+          fsPass(P.mostrar, pipeTex[ping], null, w, h, null);
+          src = pipeTex[ping];
+          continue;
+        }
       } else if (st === 'dalton') {
         const pd = P.dalton;
         const active = state.enDalton && (state.type !== 0 || state.sev > 0);
@@ -218,10 +283,11 @@
           gl.uniform1f(pd.loc.uOutputLinear, toScreen ? 0.0 : 1.0);
           gl.uniform1f(pd.loc.uEnabled, active ? 1.0 : 0.0);
         });
+        if (!optAfterDalton && hasOpt && toScreen) texAuditSrc = src;
       }
       if (!toScreen) { src = pipeTex[ping]; ping ^= 1; }
     }
-    if (!stages.includes('dalton') && hasOpt) texAuditSrc = src;
+    if (hasOpt && !stages.includes('dalton')) texAuditSrc = src;
     return src;
   }
 
@@ -257,7 +323,7 @@
   }
 
   // ---------------- render ----------------
-  let P = {}, meshes = {}, quad, markerVao;
+  let P = {}, meshes = {}, quad;
   const IDENTITY4 = new Float32Array([1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1]);
   function render() {
     resize();
@@ -301,6 +367,7 @@
     // Pasada mapa de calor + seleccion (IDs nítidos, sin desenfoque)
     gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
     const ph = P.heat; gl.useProgram(ph.p);
+    gl.bindVertexArray(quad);
     gl.activeTexture(gl.TEXTURE0); gl.bindTexture(gl.TEXTURE_2D, texId); gl.uniform1i(ph.loc.uIds, 0);
     gl.activeTexture(gl.TEXTURE1); gl.bindTexture(gl.TEXTURE_2D, texStatus); gl.uniform1i(ph.loc.uStatus, 1);
     gl.uniform1f(ph.loc.uSelected, state.selected);
@@ -308,21 +375,7 @@
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.BLEND);
 
-    if (state.showLight) {
-      const behind = markerBehindCamera(e, light);
-      const lm = lightMarkerPos(light);
-      const ml = P.marcaluz;
-      gl.enable(gl.BLEND); gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-      gl.useProgram(ml.p);
-      gl.uniform3fv(ml.loc.uCenter, lm);
-      gl.uniform3fv(ml.loc.uEye, e);
-      gl.uniform1f(ml.loc.uRadius, behind ? 0.16 : 0.22);
-      gl.uniform1f(ml.loc.uBehind, behind ? 1.0 : 0.0);
-      gl.uniformMatrix4fv(ml.loc.uViewProj, false, vp);
-      gl.bindVertexArray(markerVao);
-      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      gl.disable(gl.BLEND);
-    }
+    if (state.showLight) drawLightHud(W, H, lightHudNdc(vp, light));
     gl.bindVertexArray(null);
   }
 
@@ -535,12 +588,11 @@
     try {
       const qv = await src('shaders/daltonizador.vert');
       const paths = ['shaders/escena.vert', 'shaders/escena.frag', 'shaders/daltonismo.frag', 'shaders/miopia.frag',
-        'shaders/astigmatismo.frag', 'shaders/heatmap.frag', 'shaders/mostrar.frag',
-        'shaders/marcaluz.vert', 'shaders/marcaluz.frag'];
-      const [sv, sf, dalf, mf, af, hf, showf, mlv, mlf] = await Promise.all(paths.map(src));
+        'shaders/astigmatismo.frag', 'shaders/heatmap.frag', 'shaders/mostrar.frag', 'shaders/luzhud.frag'];
+      const [sv, sf, dalf, mf, af, hf, showf, lhf] = await Promise.all(paths.map(src));
       P.scene = program(sv, sf); P.dalton = program(qv, dalf); P.miopia = program(qv, mf);
       P.astigma = program(qv, af); P.heat = program(qv, hf); P.mostrar = program(qv, showf);
-      P.marcaluz = program(mlv, mlf);
+      P.luzhud = program(qv, lhf);
       // Modelos OBJ locales: un VAO por objeto auditable (nombre "o" = campo part).
       const files = [...new Set(S.OBJECTS.map((o) => o.model))];
       const parsed = {};
@@ -550,14 +602,6 @@
         if (part) meshes[o.id] = meshVAO(part); else console.warn('Falta la parte', o.part, 'en', o.model);
       });
       quad = quadVAO();
-      markerVao = (() => {
-        const vao = gl.createVertexArray(); gl.bindVertexArray(vao);
-        const b = gl.createBuffer(); gl.bindBuffer(gl.ARRAY_BUFFER, b);
-        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
-        gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
-        gl.bindVertexArray(null);
-        return vao;
-      })();
       resize(); uploadStatus(); bind();
       requestAnimationFrame(loop);
     } catch (err) {

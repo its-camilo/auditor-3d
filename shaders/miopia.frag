@@ -29,7 +29,7 @@ float defocusDiopters(float distM) {
 }
 
 float cocPixels(float defocus) {
-  float blurAngle = uPupilMm * 1.0e-3 * defocus * 0.12;
+  float blurAngle = uPupilMm * 1.0e-3 * defocus * 0.65;
   return blurAngle * uResolution.y / max(tan(uFovy * 0.5), 1e-4);
 }
 
@@ -39,13 +39,13 @@ void main() {
   float centerDist = linearizeDepth(centerDepth);
   float centerDef = defocusDiopters(centerDist);
   float maxR = cocPixels(centerDef);
-  if (maxR < 0.35) {
+  if (maxR < 0.15) {
     outColor = vec4(centerCol, 1.0);
     return;
   }
   vec3 acc = centerCol;
   float w = 1.0;
-  const int SAMPLES = 28;
+  const int SAMPLES = 32;
   for (int i = 0; i < SAMPLES; i++) {
     float fi = float(i);
     float ang = fi * 2.39996323;
@@ -55,11 +55,10 @@ void main() {
     float sd = texture(uDepth, uv).r;
     float distPx = rad;
     float cocS = cocPixels(defocusDiopters(linearizeDepth(sd)));
-    float nearerOk = step(centerDepth + 1e-5, sd);
-    float farOk = step(distPx, cocS + 0.5);
-    float admit = max(nearerOk, farOk);
+    float admit = max(step(centerDepth - 1e-4, sd), step(distPx - 0.25, cocS));
+    admit = max(admit, 0.35);
     acc += texture(uSource, uv).rgb * admit;
     w += admit;
   }
-  outColor = vec4(acc / max(w, 1.0), 1.0);
+  outColor = vec4(acc / w, 1.0);
 }
