@@ -35,9 +35,9 @@ La iluminación de escena usa **Blinn–Phong con luz puntual** en `uLightPos` (
 
 - Dirección en cada fragmento: `L = normalize(uLightPos - vWorld)`.
 - Atenuación inversa cuadrática suavizada: `1 / (1 + k·d²)` con `k = 0,035` (`LIGHT_ATTEN_K`).
-- Azimut, elevación y **distancia** (2–12 m) definen la posición dentro del volumen del andén (`lightPosFromAzEl`).
+- Azimut, elevación y **distancia** (2–12 m) definen la posición en mundo (`lightPosFromAzEl`); solo se limita **Y ≥ 0,15 m** (suelo), sin techo artificial a 3,6 m.
 - El marcador billboard (`shaders/marcaluz.*`) se dibuja en **la misma posición** que el uniforme de la pasada de escena; no hay copia cacheada en otro estado. Cada cambio de slider dispara `render()` y actualiza sombreado y marcador en el mismo frame.
-- Si la luz queda fuera del frustum o detrás de la cámara, el fallback 2D (`luzhud.frag`) indica el azimut en el borde del canvas.
+- Si la luz queda fuera del frustum o detrás de la cámara, no se dibuja marca (solo la iluminación de la escena sigue activa).
 
 ## Auditoría y picking
 

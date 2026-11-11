@@ -98,9 +98,10 @@
   function lightPosFromAzEl(azDeg, elDeg, dist, target = SCENE_TARGET) {
     const dir = lightDir(azDeg, elDeg);
     const p = [target[0] + dir[0] * dist, target[1] + dir[1] * dist, target[2] + dir[2] * dist];
-    p[1] = Math.min(3.6, Math.max(1.15, p[1]));
-    p[0] = Math.min(5, Math.max(-5, p[0]));
-    p[2] = Math.min(4, Math.max(-3, p[2]));
+    // Solo suelo del volumen: no recortar la elevación de az/el/dist (evita marcar luz “falsa” en el techo).
+    p[1] = Math.max(0.15, p[1]);
+    p[0] = Math.min(8, Math.max(-8, p[0]));
+    p[2] = Math.min(6, Math.max(-4, p[2]));
     return p;
   }
 

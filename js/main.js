@@ -155,20 +155,20 @@
 
   function lightMarkerVisible(clip) {
     if (clip.w <= 0) return false;
-    return clip.z > -0.98 && clip.z < 0.98 && Math.abs(clip.x) <= 1.05 && Math.abs(clip.y) <= 1.05;
+    return clip.z > -0.99 && clip.z < 0.99 && Math.abs(clip.x) <= 1.0 && Math.abs(clip.y) <= 1.0;
   }
 
-  // Fallback 2D en el borde cuando la fuente sale del frustum o queda detras de la camara.
-  function lightHudNdc(vp, pos) {
+  function lightMarkerDebug(vp, eye) {
+    const pos = currentLightPos();
     const clip = lightMarkerClip(vp, pos);
-    let x = clip.x; let y = clip.y;
-    let edge = 0;
-    if (clip.w <= 0) { x = -x; y = -y; edge = 1; }
-    if (!lightMarkerVisible(clip)) edge = 1;
-    const maxR = 0.9;
-    const len = Math.hypot(x, y);
-    if (len > maxR) { x = (x / len) * maxR; y = (y / len) * maxR; edge = 1; }
-    return { x, y, edge, angle: Math.atan2(y, x) };
+    return {
+      eye: eye.slice(),
+      target: state.target.slice(),
+      uLightPos: pos.slice(),
+      ndc: [clip.x, clip.y, clip.z],
+      w: clip.w,
+      visible: lightMarkerVisible(clip)
+    };
   }
 
   function drawLightMarker3D(vp, eye, pos, w, h) {
@@ -188,24 +188,6 @@
     gl.bindTexture(gl.TEXTURE_2D, texDepth);
     gl.uniform1i(ml.loc.uDepth, 0);
     gl.bindVertexArray(markerVao);
-    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-    gl.disable(gl.BLEND);
-  }
-
-  function drawLightHud(w, h, hud) {
-    const ph = P.luzhud;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    gl.viewport(0, 0, w, h);
-    gl.disable(gl.DEPTH_TEST);
-    gl.enable(gl.BLEND);
-    gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-    gl.useProgram(ph.p);
-    gl.uniform2f(ph.loc.uResolution, w, h);
-    gl.uniform2f(ph.loc.uSunNdc, hud.x, hud.y);
-    gl.uniform1f(ph.loc.uRadiusNdc, hud.edge ? 0.045 : 0.055);
-    gl.uniform1f(ph.loc.uEdge, hud.edge);
-    gl.uniform1f(ph.loc.uArrowRad, hud.angle);
-    gl.bindVertexArray(quad);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.BLEND);
   }
@@ -437,10 +419,10 @@
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.BLEND);
 
+    window.__lightMarkerDebug = () => lightMarkerDebug(vp, e);
     if (state.showLight) {
       const clip = lightMarkerClip(vp, uLightPos);
       if (lightMarkerVisible(clip)) drawLightMarker3D(vp, e, uLightPos, W, H);
-      else drawLightHud(W, H, lightHudNdc(vp, uLightPos));
     }
     gl.bindVertexArray(null);
   }
@@ -684,11 +666,11 @@
       const qv = await src('shaders/daltonizador.vert');
       const paths = ['shaders/escena.vert', 'shaders/escena.frag', 'shaders/daltonismo.frag', 'shaders/miopia.frag',
         'shaders/astigmatismo.frag', 'shaders/heatmap.frag', 'shaders/mostrar.frag',
-        'shaders/luzhud.frag', 'shaders/marcaluz.vert', 'shaders/marcaluz.frag'];
-      const [sv, sf, dalf, mf, af, hf, showf, lhf, mlv, mlf] = await Promise.all(paths.map(src));
+        'shaders/marcaluz.vert', 'shaders/marcaluz.frag'];
+      const [sv, sf, dalf, mf, af, hf, showf, mlv, mlf] = await Promise.all(paths.map(src));
       P.scene = program(sv, sf); P.dalton = program(qv, dalf); P.miopia = program(qv, mf);
       P.astigma = program(qv, af); P.heat = program(qv, hf); P.mostrar = program(qv, showf);
-      P.luzhud = program(qv, lhf); P.marcaluz = program(mlv, mlf);
+      P.marcaluz = program(mlv, mlf);
       // Modelos OBJ locales: un VAO por objeto auditable (nombre "o" = campo part).
       const files = [...new Set(S.OBJECTS.map((o) => o.model))];
       const parsed = {};
