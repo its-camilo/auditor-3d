@@ -37,7 +37,7 @@ Requisitos: navegador con **WebGL2** (Chrome, Brave, Firefox, Safari recientes).
 | Marcas de accesibilidad (contorno/patrón) | Tecla **H** o selector «Marcas»: rayas, doble línea, puntos WCAG; apagadas |
 | Condiciones | Panel **Condiciones:** casillas daltonismo, miopía (\|D\|, pupila), astigmatismo (cilindro, eje); select **Orden** (óptica→color / color→óptica). Cada etapa activa usa su shader (`miopia.frag`, `astigmatismo.frag`, `daltonismo.frag`) en ping-pong. |
 | Tipo y severidad | Selectores «Tipo» y «Severidad» (solo si daltonismo está activo) |
-| Luz | Azimut, elevación, **distancia (2–12 m, defecto 4 m)**, presets de color; casilla **marca del origen** — círculo amarillo 3D (`marcaluz`) o flecha 2D en el borde si la luz queda fuera del frustum |
+| Luz | Azimut, elevación, **distancia (2–12 m, defecto 4 m)**, presets de color; casilla **marca del origen** — disco amarillo 3D (`marcaluz`) en la posición de la fuente |
 | Resumen auditoría | Línea superior del HUD: prefijo según condiciones (`sin condiciones`, `deutan + miopía 4 D`, etc.) + conteos de fallas y confusiones |
 
 Leyenda de marcas (no dependen solo del color, SC 1.4.1): rayas = no se distingue del fondo; doble línea = se confunde con otro objeto; punteado = WCAG < 3:1.
@@ -87,7 +87,7 @@ Derivación paso a paso de los números del HUD: sección **4.1** de `docs/revis
 | Miopía (DOF / CoC) | `shaders/miopia.frag` | Dioptrías, pupila, gather espiral |
 | Astigmatismo anisotrópico | `shaders/astigmatismo.frag` | Cilindro + eje |
 | Posición de luz (UI) | `currentLightPos()` en `js/main.js` → `uLightPos` en escena + `marcaluz` | Una sola fuente por frame |
-| Marcador 3D / fallback | `shaders/marcaluz.*`, `shaders/luzhud.frag` | Billboard con oclusión por `texDepth`; HUD 2D si fuera del frustum |
+| Marcador de luz 3D | `shaders/marcaluz.*` | Billboard con oclusión por `texDepth`; sin indicador 2D en el borde |
 | Blinn-Phong (luz puntual) | `shaders/escena.frag`, `blinnPhong()` en `js/audit-core.js` | `L = normalize(pos - x)`, atenuación `k = 0,035` |
 | Proposición 1 (luz blanca) | `tools/teoria-conmutacion.js` | ΔE ≈ 0 con D65; error con luz de color |
 | Fondo adyacente WCAG | `runAudit()` en `js/main.js` | CPU, anillo 6 px (JFA pendiente) |

@@ -186,7 +186,7 @@ const defaultRow = report.find((r) => r.file === 'shot-default-light-marker.png'
 const marker3dOk = (r) => r && r.yellowPx >= 400 && r.marker && !r.marker.includes('no detectado');
 const fail = sliderRows.some((r) => !r.syncOk || r.yellowPx < 60)
   || !marker3dOk(baselineRow) || !marker3dOk(defaultRow);
-if (!marker3dOk(baselineRow)) console.error('FAIL: baseline sin círculo amarillo 3D visible (¿flecha de borde?)');
+if (!marker3dOk(baselineRow)) console.error('FAIL: baseline sin círculo amarillo 3D visible');
 if (!marker3dOk(defaultRow)) console.error('FAIL: default sin círculo amarillo 3D visible');
 const baseline = sliderRows.find((r) => r.file.includes('baseline'));
 const azOnly = sliderRows.find((r) => r.file.includes('only-az'));
