@@ -155,7 +155,20 @@
 
   function lightMarkerVisible(clip) {
     if (clip.w <= 0) return false;
-    return clip.z > -0.98 && clip.z < 0.98 && Math.abs(clip.x) <= 1.05 && Math.abs(clip.y) <= 1.05;
+    return clip.z > -0.99 && clip.z < 0.99 && Math.abs(clip.x) <= 1.0 && Math.abs(clip.y) <= 1.0;
+  }
+
+  function lightMarkerDebug(vp, eye) {
+    const pos = currentLightPos();
+    const clip = lightMarkerClip(vp, pos);
+    return {
+      eye: eye.slice(),
+      target: state.target.slice(),
+      uLightPos: pos.slice(),
+      ndc: [clip.x, clip.y, clip.z],
+      w: clip.w,
+      visible: lightMarkerVisible(clip)
+    };
   }
 
   function drawLightMarker3D(vp, eye, pos, w, h) {
@@ -406,6 +419,7 @@
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
     gl.disable(gl.BLEND);
 
+    window.__lightMarkerDebug = () => lightMarkerDebug(vp, e);
     if (state.showLight) {
       const clip = lightMarkerClip(vp, uLightPos);
       if (lightMarkerVisible(clip)) drawLightMarker3D(vp, e, uLightPos, W, H);

@@ -33,4 +33,6 @@ En las cinco tomas `sync uLightPos = sí` (deriva < 1e−4 entre uniforme y func
 
 En `index.html`: slider **Distancia (m)** (`lightDist`, 2–12, **defecto 4**). Los eventos `input` y `change` marcan `state.dirty` para redibujar en el mismo frame.
 
-No existe indicador 2D en el borde (`luzhud.frag` eliminado). Si la fuente queda fuera del frustum, no hay marca; ver `node tools/capture-light-marker.mjs` (caso usuario: az 75°, el 75°, sodio).
+No existe indicador 2D en el borde (`luzhud.frag` eliminado). Si la proyección del centro de `uLightPos` cae fuera del frustum (|NDC| > 1), no se dibuja marca.
+
+**Nota sobre az 0°, el 85°, 12 m:** la posición geométrica queda en **Y ≈ 13,35 m** (NDC **y ≈ 3,92**); antes un tope artificial **Y ≤ 3,6 m** en `lightPosFromAzEl` acercaba la luz al muro y generaba una marca falsa. Ese tope se eliminó; iluminación y `marcaluz` usan la misma `uLightPos`.
